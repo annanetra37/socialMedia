@@ -1,0 +1,83 @@
+{
+  "name": "Luna Silver",
+  "tagline": "Handcrafted Nordic Jewellery",
+  "industry": "Luxury Jewellery / E-commerce",
+  "website": "https://lunasilver.example.com",
+  "instagram_handle": "@lunasilver_nordic",
+  "brand_voice": "Elegant, storytelling-led, culturally rich. We celebrate Nordic heritage and craftsmanship. Never pushy — we educate and inspire.",
+  "brand_values": ["craftsmanship", "sustainability", "cultural heritage", "timeless design"],
+  "target_audience": {
+    "age_range": "25–45",
+    "gender": "primarily female",
+    "location": "Scandinavia, UK, Germany, USA",
+    "interests": ["jewellery", "Nordic culture", "sustainable fashion", "gift-giving", "interior design"],
+    "income": "middle to upper-middle class",
+    "pain_points": ["finding unique gifts", "supporting independent artisans", "owning meaningful pieces"]
+  },
+  "products": [
+    {"name": "Nordic Rune Necklace", "price_eur": 120, "bestseller": true},
+    {"name": "Silver Fjord Bracelet", "price_eur": 85, "bestseller": true},
+    {"name": "Midnight Sun Earrings", "price_eur": 65, "bestseller": false},
+    {"name": "Viking Knot Ring", "price_eur": 95, "bestseller": false},
+    {"name": "Birch Leaf Pendant", "price_eur": 75, "bestseller": true}
+  ],
+  "content_pillars": {
+    "product_showcase": 0.40,
+    "cultural_storytelling": 0.25,
+    "lifestyle_inspiration": 0.20,
+    "craftsmanship_process": 0.15
+  },
+  "competitors": [
+    {"handle": "@nordiccraft_jewels", "followers": 45000, "notes": "strong reels, process videos"},
+    {"handle": "@silverfrost_uk", "followers": 32000, "notes": "strong storytelling, UK focus"},
+    {"handle": "@mythology_silver", "followers": 28000, "notes": "mythology angle, educational content"}
+  ],
+  "social_media": {
+    "instagram": {
+      "handle": "@lunasilver_nordic",
+      "current_followers": 8420,
+      "avg_engagement_rate": 3.2,
+      "best_posting_times": ["12:00", "18:00"],
+      "top_hashtags": ["#nordicjewellery", "#handcraftedjewellery", "#silversmith", "#scandinaviandesign"]
+    }
+  },
+  "goals": {
+    "monthly_follower_growth": 500,
+    "engagement_rate_target": 5.0,
+    "monthly_dms_leads": 40,
+    "monthly_sales_from_social": 25,
+    "brand_awareness": "Become the #1 Nordic jewellery brand on Instagram in the UK"
+  },
+  "past_performance": {
+    "last_month": {
+      "followers_gained": 312,
+      "avg_engagement_rate": 3.2,
+      "best_post_type": "reels",
+      "best_posting_time": "18:00",
+      "dm_leads": 22,
+      "sales_from_social": 14,
+      "top_performing_content": "Behind-the-scenes crafting reel",
+      "worst_performing_content": "Static product image"
+    },
+    "last_quarter": {
+      "followers_gained": 890,
+      "avg_engagement_rate": 2.8,
+      "total_dm_leads": 58,
+      "total_sales_from_social": 41
+    }
+  },
+  "campaign_history": [
+    {
+      "name": "Winter Solstice Collection",
+      "month": "December",
+      "theme": "gift-giving season",
+      "result": "Best performing — +18% sales"
+    },
+    {
+      "name": "Craftsmanship Series",
+      "month": "October",
+      "theme": "behind-the-scenes process",
+      "result": "High engagement — avg 6.1% rate"
+    }
+  ]
+}
