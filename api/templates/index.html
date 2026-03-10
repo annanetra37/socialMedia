@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Social Media OS</title>
+<style>
+  :root {
+    --bg:       #0d0d14;
+    --surface:  #14141f;
+    --border:   #1e1e30;
+    --primary:  #6c63ff;
+    --accent:   #00d4aa;
+    --warning:  #f5a623;
+    --danger:   #e05c5c;
+    --text:     #e8e6f0;
+    --muted:    #7a7890;
+    --card-bg:  #171724;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; font-size: 14px; line-height: 1.6; }
+
+  /* ── Layout ── */
+  .layout { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; }
+  .sidebar { background: var(--surface); border-right: 1px solid var(--border); padding: 0; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+  .main { padding: 28px 32px; overflow-y: auto; }
+
+  /* ── Sidebar ── */
+  .sidebar-logo { padding: 20px 20px 12px; border-bottom: 1px solid var(--border); }
+  .sidebar-logo h1 { font-size: 13px; font-weight: 700; color: var(--primary); letter-spacing: 0.08em; text-transform: uppercase; }
+  .sidebar-logo p { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .mode-badge { display: inline-block; font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 9px; margin-top: 8px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .mode-demo  { background: rgba(245,166,35,0.18); color: var(--warning); }
+  .mode-live  { background: rgba(0,212,170,0.18);  color: var(--accent);  }
+
+  .sidebar-section { padding: 12px 0; }
+  .sidebar-section label { display: block; font-size: 10px; font-weight: 700; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; padding: 0 20px 6px; }
+  .sidebar-brand-list { list-style: none; }
+  .sidebar-brand-list li { padding: 0; }
+  .sidebar-brand-list li a {
+    display: flex; align-items: center; gap: 8px; padding: 7px 20px;
+    color: var(--muted); text-decoration: none; font-size: 13px; cursor: pointer; transition: all 0.15s;
+  }
+  .sidebar-brand-list li a:hover, .sidebar-brand-list li a.active { background: rgba(108,99,255,0.12); color: var(--text); }
+  .sidebar-brand-list li a .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--primary); opacity: 0.6; flex-shrink: 0; }
+
+  .sidebar-nav { list-style: none; }
+  .sidebar-nav li a {
+    display: flex; align-items: center; gap: 9px; padding: 8px 20px;
+    color: var(--muted); text-decoration: none; font-size: 13px; cursor: pointer; transition: all 0.15s;
+  }
+  .sidebar-nav li a:hover, .sidebar-nav li a.active { color: var(--text); background: rgba(255,255,255,0.04); }
+  .sidebar-nav li a span.icon { font-size: 15px; width: 20px; text-align: center; }
+
+  .sidebar-divider { height: 1px; background: var(--border); margin: 8px 20px; }
+
+  /* ── Header ── */
+  .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+  .page-header h2 { font-size: 20px; font-weight: 600; }
+  .page-header .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+
+  /* ── Cards ── */
+  .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
+  .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .card-header h3 { font-size: 14px; font-weight: 600; }
+  .card-header .icon { font-size: 18px; }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  @media (max-width: 900px) { .grid-4 { grid-template-columns: repeat(2, 1fr); } .grid-3 { grid-template-columns: repeat(2, 1fr); } }
+
+  /* ── Stat cards ── */
+  .stat { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; }
+  .stat .label { font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; }
+  .stat .value { font-size: 28px; font-weight: 700; margin: 4px 0 2px; }
+  .stat .delta { font-size: 12px; color: var(--accent); }
+  .stat .delta.neg { color: var(--danger); }
+
+  /* ── Buttons ── */
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 7px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; transition: all 0.15s; }
+  .btn-primary  { background: var(--primary); color: #fff; }
+  .btn-primary:hover  { background: #7c74ff; }
+  .btn-accent   { background: var(--accent); color: #001a15; }
+  .btn-accent:hover   { background: #00eebc; }
+  .btn-outline  { background: transparent; color: var(--text); border: 1px solid var(--border); }
+  .btn-outline:hover  { background: rgba(255,255,255,0.05); }
+  .btn-danger   { background: var(--danger); color: #fff; }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn-sm { padding: 5px 11px; font-size: 12px; }
+
+  /* ── Form ── */
+  .form-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  select, input[type=number] {
+    background: var(--surface); color: var(--text); border: 1px solid var(--border);
+    border-radius: 7px; padding: 7px 10px; font-size: 13px; outline: none;
+  }
+  select:focus, input:focus { border-color: var(--primary); }
+
+  /* ── Log terminal ── */
+  .terminal {
+    background: #0a0a10; border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px 16px; font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 12px; line-height: 1.8; max-height: 320px; overflow-y: auto;
+    color: #9effd4;
+  }
+  .terminal .log-line { display: block; }
+  .terminal .log-line.err { color: var(--danger); }
+  .terminal .log-line.done { color: var(--accent); font-weight: bold; }
+  .terminal .log-line.ts { color: var(--muted); font-size: 11px; }
+
+  /* ── Progress bar ── */
+  .progress-wrap { background: var(--border); border-radius: 4px; height: 6px; overflow: hidden; }
+  .progress-bar  { height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--primary), var(--accent)); transition: width 0.4s ease; }
+
+  /* ── Tables ── */
+  .data-table { width: 100%; border-collapse: collapse; }
+  .data-table th { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.07em; padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+  .data-table td { padding: 9px 12px; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 13px; vertical-align: top; }
+  .data-table tr:last-child td { border-bottom: none; }
+  .data-table tr:hover td { background: rgba(255,255,255,0.025); }
+
+  /* ── Badges ── */
+  .badge { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 5px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .badge-reel     { background: rgba(224,92,92,0.2);   color: #f08080; }
+  .badge-carousel { background: rgba(108,99,255,0.2); color: #a09aff; }
+  .badge-image    { background: rgba(0,212,170,0.18);  color: var(--accent); }
+  .badge-story    { background: rgba(245,166,35,0.18); color: var(--warning); }
+  .badge-high     { background: rgba(224,92,92,0.18);  color: #f08080; }
+  .badge-medium   { background: rgba(245,166,35,0.18); color: var(--warning); }
+  .badge-low      { background: rgba(0,212,170,0.15);  color: var(--accent); }
+  .badge-done     { background: rgba(0,212,170,0.18);  color: var(--accent); }
+  .badge-running  { background: rgba(108,99,255,0.2);  color: #a09aff; }
+  .badge-error    { background: rgba(224,92,92,0.2);   color: var(--danger); }
+
+  /* ── Tabs ── */
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+  .tab  { padding: 8px 16px; font-size: 13px; font-weight: 500; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; }
+  .tab.active  { color: var(--primary); border-bottom-color: var(--primary); }
+  .tab:hover   { color: var(--text); }
+  .tab-panel   { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* ── JSON viewer ── */
+  .json-view { background: #0a0a10; border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; font-family: monospace; font-size: 12px; line-height: 1.7; overflow-x: auto; max-height: 420px; overflow-y: auto; white-space: pre; color: #c3e88d; }
+
+  /* ── Schedule grid ── */
+  .schedule-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+  .schedule-block { border: 1px solid var(--border); border-radius: 8px; padding: 12px; text-align: center; }
+  .schedule-block .block-letter { font-size: 22px; font-weight: 800; color: var(--primary); }
+  .schedule-block .block-name   { font-size: 11px; color: var(--muted); margin: 2px 0 6px; }
+  .schedule-block input { width: 90px; text-align: center; }
+
+  /* ── Upload zone ── */
+  .upload-zone {
+    border: 2px dashed var(--border); border-radius: 10px; padding: 32px;
+    text-align: center; color: var(--muted); cursor: pointer; transition: all 0.2s;
+  }
+  .upload-zone:hover { border-color: var(--primary); color: var(--text); }
+  .upload-zone input[type=file] { display: none; }
+
+  /* ── Insight pills ── */
+  .insight-list { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+  .insight-list li { background: rgba(108,99,255,0.08); border: 1px solid rgba(108,99,255,0.2); border-radius: 7px; padding: 9px 14px; font-size: 13px; }
+  .insight-list li::before { content: "💡 "; }
+
+  /* ── Empty state ── */
+  .empty-state { text-align: center; padding: 48px 24px; color: var(--muted); }
+  .empty-state .icon { font-size: 40px; margin-bottom: 12px; }
+  .empty-state p { font-size: 14px; }
+
+  /* ── Section spacing ── */
+  .section { margin-bottom: 28px; }
+  .section-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.09em; color: var(--muted); margin-bottom: 12px; }
+
+  /* ── Spinner ── */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.2); border-top-color: white; border-radius: 50%; animation: spin 0.7s linear infinite; display: inline-block; }
+
+  /* ── Toast ── */
+  .toast-wrap { position: fixed; bottom: 24px; right: 24px; display: flex; flex-direction: column; gap: 8px; z-index: 999; }
+  .toast { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 16px; font-size: 13px; max-width: 320px; animation: toast-in 0.2s ease; box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
+  @keyframes toast-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+  .toast.success { border-left: 3px solid var(--accent); }
+  .toast.error   { border-left: 3px solid var(--danger); }
+</style>
+</head>
+<body>
+
+<div class="layout">
+<!-- ════ SIDEBAR ════ -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <h1>AI Social Media OS</h1>
+    <p>Powered by Claude claude-opus-4-6</p>
+    <span class="mode-badge mode-{{ run_mode }}" id="mode-badge">{{ run_mode }}</span>
+  </div>
+
+  <div class="sidebar-section">
+    <label>Brands</label>
+    <ul class="sidebar-brand-list" id="brand-list">
+      <li><a href="#" class="active" data-slug="luna_silver"><span class="dot"></span>Luna Silver</a></li>
+    </ul>
+  </div>
+
+  <div class="sidebar-divider"></div>
+
+  <div class="sidebar-section">
+    <label>Navigation</label>
+    <ul class="sidebar-nav">
+      <li><a href="#" onclick="showSection('run')" class="active"   id="nav-run"><span class="icon">▶</span> Run Cycle</a></li>
+      <li><a href="#" onclick="showSection('results')" id="nav-results"><span class="icon">📊</span> Results</a></li>
+      <li><a href="#" onclick="showSection('schedule')" id="nav-schedule"><span class="icon">🗓</span> Automation</a></li>
+      <li><a href="#" onclick="showSection('brands')" id="nav-brands"><span class="icon">🏷</span> Brands</a></li>
+    </ul>
+  </div>
+
+  <div class="sidebar-divider"></div>
+  <div style="padding: 12px 20px;">
+    <div style="font-size: 11px; color: var(--muted);" id="health-status">● Checking…</div>
+  </div>
+</aside>
+
+<!-- ════ MAIN ════ -->
+<main class="main">
+
+<!-- ══ RUN CYCLE ══ -->
+<section id="section-run">
+  <div class="page-header">
+    <div>
+      <h2>Run Cycle</h2>
+      <div class="sub" id="active-brand-name">Luna Silver · Instagram</div>
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div class="grid-4 section" id="stat-cards">
+    <div class="stat"><div class="label">Followers</div><div class="value" id="stat-followers">—</div><div class="delta" id="stat-followers-d">—</div></div>
+    <div class="stat"><div class="label">Engagement</div><div class="value" id="stat-engagement">—</div><div class="delta" id="stat-engagement-d">—</div></div>
+    <div class="stat"><div class="label">Hot Leads</div><div class="value" id="stat-leads">—</div><div class="delta" id="stat-leads-d">—</div></div>
+    <div class="stat"><div class="label">Posts Queued</div><div class="value" id="stat-posts">—</div><div class="delta" id="stat-posts-d">—</div></div>
+  </div>
+
+  <!-- Controls -->
+  <div class="card section">
+    <div class="card-header"><h3>Launch Agent Pipeline</h3></div>
+    <div class="form-row" style="margin-bottom: 16px;">
+      <div>
+        <label style="font-size:11px; color:var(--muted); display:block; margin-bottom:4px;">Cycle</label>
+        <select id="cycle-select">
+          <option value="full">Full Cycle (all 8 phases)</option>
+          <option value="monitoring">A — Monitoring</option>
+          <option value="engagement">B — Engagement</option>
+          <option value="content">C — Content Creation</option>
+          <option value="growth">D — Growth</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:11px; color:var(--muted); display:block; margin-bottom:4px;">Week</label>
+        <select id="week-select">
+          <option value="1">Week 1</option>
+          <option value="2">Week 2</option>
+          <option value="3">Week 3</option>
+          <option value="4">Week 4</option>
+        </select>
+      </div>
+      <div style="margin-top:18px;">
+        <button class="btn btn-primary" id="run-btn" onclick="runCycle()">
+          <span id="run-btn-icon">▶</span> Run Cycle
+        </button>
+      </div>
+    </div>
+
+    <!-- Progress -->
+    <div id="progress-section" style="display:none;">
+      <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+        <span style="font-size:12px; color:var(--muted);" id="progress-label">Starting…</span>
+        <span class="badge badge-running" id="progress-status">running</span>
+      </div>
+      <div class="progress-wrap" style="margin-bottom: 14px;">
+        <div class="progress-bar" id="progress-bar" style="width:5%"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Live log -->
+  <div class="card section" id="log-card" style="display:none;">
+    <div class="card-header">
+      <h3>Live Agent Log</h3>
+      <button class="btn btn-outline btn-sm" onclick="clearLog()">Clear</button>
+    </div>
+    <div class="terminal" id="log-terminal">
+      <span class="log-line" style="color:var(--muted)">Waiting for cycle to start…</span>
+    </div>
+  </div>
+</section>
+
+<!-- ══ RESULTS ══ -->
+<section id="section-results" style="display:none;">
+  <div class="page-header">
+    <div><h2>Results</h2><div class="sub">Latest stored data for the active brand</div></div>
+    <button class="btn btn-outline" onclick="loadResults()">↻ Refresh</button>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" onclick="showTab('tab-strategy')">Strategy</div>
+    <div class="tab" onclick="showTab('tab-trends')">Trends</div>
+    <div class="tab" onclick="showTab('tab-campaign')">Campaign</div>
+    <div class="tab" onclick="showTab('tab-analytics')">Analytics</div>
+    <div class="tab" onclick="showTab('tab-optimization')">Optimization</div>
+  </div>
+
+  <div id="tab-strategy" class="tab-panel active">
+    <div id="strategy-content"><div class="empty-state"><div class="icon">📋</div><p>Run a cycle to generate strategy data</p></div></div>
+  </div>
+  <div id="tab-trends" class="tab-panel">
+    <div id="trends-content"><div class="empty-state"><div class="icon">🔍</div><p>Run a cycle to generate trend data</p></div></div>
+  </div>
+  <div id="tab-campaign" class="tab-panel">
+    <div id="campaign-content"><div class="empty-state"><div class="icon">📅</div><p>Run a cycle to generate campaign plan</p></div></div>
+  </div>
+  <div id="tab-analytics" class="tab-panel">
+    <div id="analytics-content"><div class="empty-state"><div class="icon">📊</div><p>Run a cycle to generate analytics</p></div></div>
+  </div>
+  <div id="tab-optimization" class="tab-panel">
+    <div id="optimization-content"><div class="empty-state"><div class="icon">⚙️</div><p>Run a cycle to generate optimizations</p></div></div>
+  </div>
+</section>
+
+<!-- ══ AUTOMATION SCHEDULE ══ -->
+<section id="section-schedule" style="display:none;">
+  <div class="page-header">
+    <div><h2>Daily Automation</h2><div class="sub">Schedule the four blocks to run automatically every day</div></div>
+  </div>
+
+  <div class="card section">
+    <div class="card-header"><h3>Block Schedule</h3><span id="schedule-status-badge" class="badge">loading…</span></div>
+    <div class="schedule-grid">
+      <div class="schedule-block">
+        <div class="block-letter">A</div>
+        <div class="block-name">Monitoring</div>
+        <input type="time" id="t-monitoring" value="07:00">
+      </div>
+      <div class="schedule-block">
+        <div class="block-letter">B</div>
+        <div class="block-name">Engagement</div>
+        <input type="time" id="t-engagement" value="08:00">
+      </div>
+      <div class="schedule-block">
+        <div class="block-letter">C</div>
+        <div class="block-name">Content</div>
+        <input type="time" id="t-content" value="09:00">
+      </div>
+      <div class="schedule-block">
+        <div class="block-letter">D</div>
+        <div class="block-name">Growth</div>
+        <input type="time" id="t-growth" value="17:00">
+      </div>
+    </div>
+    <div class="form-row">
+      <div>
+        <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px;">Timezone</label>
+        <select id="tz-select">
+          <option value="UTC">UTC</option>
+          <option value="Europe/London">Europe/London</option>
+          <option value="Europe/Paris">Europe/Paris</option>
+          <option value="America/New_York">America/New_York</option>
+          <option value="America/Los_Angeles">America/Los_Angeles</option>
+          <option value="Asia/Dubai">Asia/Dubai</option>
+        </select>
+      </div>
+      <div style="margin-top:18px; display:flex; gap:8px;">
+        <button class="btn btn-accent" onclick="enableSchedule()">✓ Enable Daily Automation</button>
+        <button class="btn btn-outline" onclick="disableSchedule()">✗ Disable</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="schedule-jobs-card" style="display:none;">
+    <div class="card-header"><h3>Scheduled Jobs</h3></div>
+    <div id="schedule-jobs-list"></div>
+  </div>
+</section>
+
+<!-- ══ BRANDS ══ -->
+<section id="section-brands" style="display:none;">
+  <div class="page-header">
+    <div><h2>Brand Profiles</h2><div class="sub">Upload a custom brand profile JSON to get started</div></div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-header"><h3>Upload Brand Profile</h3></div>
+      <div class="upload-zone" onclick="document.getElementById('brand-file').click()">
+        <input type="file" id="brand-file" accept=".json" onchange="uploadBrand(event)">
+        <div style="font-size:32px;margin-bottom:8px;">📁</div>
+        <div style="font-weight:600;margin-bottom:4px;">Drop or click to upload</div>
+        <div style="font-size:12px;">JSON brand profile file</div>
+      </div>
+      <div style="margin-top:14px;">
+        <a href="/api/brands" target="_blank" class="btn btn-outline btn-sm">View example JSON structure →</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><h3>Available Brands</h3></div>
+      <div id="brands-table"><div style="color:var(--muted);font-size:13px;">Loading…</div></div>
+    </div>
+  </div>
+</section>
+
+</main>
+</div>
+
+<!-- Toast container -->
+<div class="toast-wrap" id="toast-wrap"></div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let activeBrand = 'luna_silver';
+let activeJob   = null;
+let sseSource   = null;
+
+// ── Init ───────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  loadBrands();
+  checkHealth();
+  setInterval(checkHealth, 30000);
+});
+
+// ── Navigation ─────────────────────────────────────────────────────────────
+function showSection(name) {
+  ['run', 'results', 'schedule', 'brands'].forEach(s => {
+    document.getElementById('section-' + s).style.display = s === name ? '' : 'none';
+    document.getElementById('nav-' + s).classList.toggle('active', s === name);
+  });
+  if (name === 'results')  loadResults();
+  if (name === 'schedule') loadSchedule();
+  if (name === 'brands')   loadBrandsTable();
+}
+
+function showTab(tabId) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById(tabId).classList.add('active');
+  event.target.classList.add('active');
+}
+
+// ── Health check ───────────────────────────────────────────────────────────
+async function checkHealth() {
+  try {
+    const r = await fetch('/api/health');
+    const d = await r.json();
+    const el = document.getElementById('health-status');
+    el.style.color = 'var(--accent)';
+    el.textContent = `● Online · ${d.run_mode} mode · ${d.active_jobs} active jobs`;
+  } catch {
+    document.getElementById('health-status').style.color = 'var(--danger)';
+    document.getElementById('health-status').textContent = '● Offline';
+  }
+}
+
+// ── Brands ─────────────────────────────────────────────────────────────────
+async function loadBrands() {
+  const r = await fetch('/api/brands');
+  const d = await r.json();
+  const ul = document.getElementById('brand-list');
+  ul.innerHTML = '';
+  d.brands.forEach(b => {
+    const li = document.createElement('li');
+    li.innerHTML = `<a href="#" data-slug="${b.slug}" onclick="selectBrand('${b.slug}', '${b.name}')">
+      <span class="dot"></span>${b.name}</a>`;
+    if (b.slug === activeBrand) li.querySelector('a').classList.add('active');
+    ul.appendChild(li);
+  });
+}
+
+function selectBrand(slug, name) {
+  activeBrand = slug;
+  document.querySelectorAll('#brand-list a').forEach(a => a.classList.toggle('active', a.dataset.slug === slug));
+  document.getElementById('active-brand-name').textContent = name + ' · Instagram';
+  loadStats();
+}
+
+async function loadBrandsTable() {
+  const r = await fetch('/api/brands');
+  const d = await r.json();
+  const el = document.getElementById('brands-table');
+  if (!d.brands.length) { el.innerHTML = '<div style="color:var(--muted)">No brands found</div>'; return; }
+  el.innerHTML = `<table class="data-table">
+    <tr><th>Name</th><th>Industry</th><th>Handle</th><th>Source</th></tr>
+    ${d.brands.map(b => `<tr>
+      <td><a href="#" onclick="selectBrand('${b.slug}','${b.name}'); showSection('run');" style="color:var(--primary); text-decoration:none;">${b.name}</a></td>
+      <td style="color:var(--muted)">${b.industry || '—'}</td>
+      <td style="color:var(--muted)">${b.instagram_handle || '—'}</td>
+      <td><span class="badge ${b.source === 'built-in' ? 'badge-image' : 'badge-carousel'}">${b.source}</span></td>
+    </tr>`).join('')}
+  </table>`;
+}
+
+async function uploadBrand(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const text = await file.text();
+  try {
+    const profile = JSON.parse(text);
+    const r = await fetch('/api/brands', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(profile) });
+    const d = await r.json();
+    if (d.saved) { toast(`✓ Brand '${d.name}' uploaded`, 'success'); loadBrands(); loadBrandsTable(); }
+    else toast('Failed to upload brand', 'error');
+  } catch { toast('Invalid JSON file', 'error'); }
+}
+
+// ── Stats ──────────────────────────────────────────────────────────────────
+async function loadStats() {
+  try {
+    const r = await fetch(`/api/results/${activeBrand}`);
+    if (!r.ok) return;
+    const d = await r.json();
+    const analytics = d.analytics || {};
+    const engagement = d.campaign || {};
+    const schedule = d.strategy || {};
+    const acct = analytics.account_metrics || {};
+    const perf = analytics.content_performance || {};
+    const funnel = analytics.dm_funnel || {};
+
+    setText('stat-followers', acct.followers_end ? fmt(acct.followers_end) : '—');
+    setText('stat-followers-d', acct.followers_gained ? `+${acct.followers_gained} this period` : '');
+    setText('stat-engagement', perf.avg_engagement_rate ? perf.avg_engagement_rate + '%' : '—');
+    setText('stat-engagement-d', 'avg across all posts');
+    setText('stat-leads', funnel.leads_qualified ?? '—');
+    setText('stat-leads-d', funnel.sales_from_social ? `${funnel.sales_from_social} sales` : '');
+    const posts = (d.campaign || {}).weekly_summary || {};
+    setText('stat-posts', posts.total_posts ?? '—');
+    setText('stat-posts-d', 'this week');
+  } catch {}
+}
+
+// ── Run Cycle ──────────────────────────────────────────────────────────────
+async function runCycle() {
+  const cycle = document.getElementById('cycle-select').value;
+  const week  = parseInt(document.getElementById('week-select').value);
+  const btn   = document.getElementById('run-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Starting…';
+
+  const r = await fetch('/api/cycle/run', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ brand_slug: activeBrand, cycle, week })
+  });
+  const d = await r.json();
+  activeJob = d.job_id;
+
+  document.getElementById('log-card').style.display = '';
+  document.getElementById('progress-section').style.display = '';
+  document.getElementById('log-terminal').innerHTML = '';
+
+  startSSE(d.job_id, cycle);
+}
+
+function startSSE(jobId, cycle) {
+  if (sseSource) sseSource.close();
+  sseSource = new EventSource(`/api/stream/${jobId}`);
+  let phase = 0;
+  const phases = cycle === 'full' ? 8 : 1;
+
+  sseSource.onmessage = (ev) => {
+    const data = JSON.parse(ev.data);
+    if (data.log) {
+      appendLog(data.log);
+      // Simple progress heuristic
+      if (data.log.includes('Phase')) {
+        const m = data.log.match(/Phase (\d+)\//);
+        if (m) {
+          phase = parseInt(m[1]);
+          const pct = Math.round((phase / phases) * 95);
+          document.getElementById('progress-bar').style.width = pct + '%';
+          document.getElementById('progress-label').textContent = data.log.replace(/\[.*?\] /, '');
+        }
+      }
+    }
+    if (data.done) {
+      sseSource.close();
+      const ok = data.status === 'done';
+      document.getElementById('progress-bar').style.width = '100%';
+      document.getElementById('progress-label').textContent = ok ? 'Cycle complete!' : 'Error occurred';
+      document.getElementById('progress-status').textContent = ok ? 'done' : 'error';
+      document.getElementById('progress-status').className = `badge badge-${ok ? 'done' : 'error'}`;
+      document.getElementById('run-btn').disabled = false;
+      document.getElementById('run-btn').innerHTML = '▶ Run Cycle';
+      if (ok) { toast('✅ Cycle complete!', 'success'); loadStats(); }
+      else     toast('❌ Cycle failed — check log', 'error');
+    }
+  };
+  sseSource.onerror = () => { sseSource.close(); };
+}
+
+function appendLog(line) {
+  const el = document.getElementById('log-terminal');
+  const span = document.createElement('span');
+  span.className = 'log-line' + (line.includes('❌') ? ' err' : line.includes('✅') ? ' done' : '');
+  span.textContent = line;
+  el.appendChild(span);
+  el.appendChild(document.createElement('br'));
+  el.scrollTop = el.scrollHeight;
+}
+
+function clearLog() {
+  document.getElementById('log-terminal').innerHTML = '';
+}
+
+// ── Results ────────────────────────────────────────────────────────────────
+async function loadResults() {
+  try {
+    const r = await fetch(`/api/results/${activeBrand}`);
+    if (!r.ok) { showEmptyResults(); return; }
+    const d = await r.json();
+    renderStrategy(d.strategy);
+    renderTrends(d.trends);
+    renderCampaign(d.campaign);
+    renderAnalytics(d.analytics);
+    renderOptimization(d.optimizations);
+  } catch { showEmptyResults(); }
+}
+
+function showEmptyResults() {
+  ['strategy','trends','campaign','analytics','optimization'].forEach(k => {
+    const el = document.getElementById(k + '-content');
+    if (el) el.innerHTML = `<div class="empty-state"><div class="icon">📭</div><p>No data yet — run a cycle first</p></div>`;
+  });
+}
+
+function renderStrategy(data) {
+  if (!data) { document.getElementById('strategy-content').innerHTML = '<div class="empty-state"><div class="icon">📋</div><p>No strategy data yet</p></div>'; return; }
+  let html = '';
+  // Summary
+  html += `<div class="card section"><div class="card-header"><h3>Executive Summary</h3></div><p style="color:var(--muted);font-size:13px;">${data.executive_summary || '—'}</p></div>`;
+  // Pillars
+  if (data.content_pillars) {
+    html += `<div class="card section"><div class="card-header"><h3>Content Pillars</h3></div>
+    <table class="data-table"><tr><th>Pillar</th><th>Mix %</th><th>Rationale</th></tr>
+    ${data.content_pillars.map(p => `<tr><td>${p.name}</td><td>${p.percentage}%</td><td style="color:var(--muted)">${p.rationale}</td></tr>`).join('')}
+    </table></div>`;
+  }
+  // Themes
+  if (data.campaign_themes) {
+    html += `<div class="card section"><div class="card-header"><h3>Campaign Themes</h3></div>
+    <table class="data-table"><tr><th>Week</th><th>Theme</th><th>Emotion</th><th>Hook Style</th></tr>
+    ${data.campaign_themes.map(t => `<tr><td>${t.week}</td><td>${t.theme}</td><td style="color:var(--warning)">${t.emotion}</td><td style="color:var(--muted)">${t.hook_style}</td></tr>`).join('')}
+    </table></div>`;
+  }
+  // KPIs
+  if (data.kpis) {
+    const k = data.kpis;
+    html += `<div class="card"><div class="card-header"><h3>KPI Targets</h3></div>
+    <div class="grid-3">
+      <div class="stat"><div class="label">Followers / Month</div><div class="value">+${k.followers_target || '—'}</div></div>
+      <div class="stat"><div class="label">Engagement Target</div><div class="value">${k.engagement_rate_target || '—'}%</div></div>
+      <div class="stat"><div class="label">DM Leads / Month</div><div class="value">${k.dm_leads_target || '—'}</div></div>
+    </div></div>`;
+  }
+  document.getElementById('strategy-content').innerHTML = html;
+}
+
+function renderTrends(data) {
+  if (!data) { document.getElementById('trends-content').innerHTML = '<div class="empty-state"><div class="icon">🔍</div><p>No trend data yet</p></div>'; return; }
+  let html = '';
+  if (data.trending_topics) {
+    html += `<div class="card section"><div class="card-header"><h3>Trending Topics</h3></div>
+    <table class="data-table"><tr><th>Topic</th><th>Platform</th><th>Fit</th><th>Urgency</th><th>Content Angle</th></tr>
+    ${data.trending_topics.map(t => `<tr>
+      <td style="font-weight:500">${t.topic}</td>
+      <td style="color:var(--muted)">${t.platform}</td>
+      <td><span class="badge badge-${t.fit_score>=8?'done':t.fit_score>=6?'medium':'error'}">${t.fit_score}/10</span></td>
+      <td>${t.urgency}</td>
+      <td style="color:var(--muted);font-size:12px">${t.content_angle}</td>
+    </tr>`).join('')}
+    </table></div>`;
+  }
+  if (data.top_recommendations) {
+    html += `<div class="card"><div class="card-header"><h3>Top Recommendations</h3></div>
+    <ul class="insight-list">${data.top_recommendations.map(r => `<li>${r}</li>`).join('')}</ul></div>`;
+  }
+  document.getElementById('trends-content').innerHTML = html;
+}
+
+function renderCampaign(data) {
+  if (!data || !data.posts) { document.getElementById('campaign-content').innerHTML = '<div class="empty-state"><div class="icon">📅</div><p>No campaign data yet</p></div>'; return; }
+  const typeColors = { reel:'badge-reel', carousel:'badge-carousel', image:'badge-image', story:'badge-story' };
+  const prioColors = { high:'badge-high', medium:'badge-medium', low:'badge-low' };
+  let html = `<div class="card"><div class="card-header"><h3>Week ${data.week_number} — ${data.theme}</h3>
+    <span style="font-size:12px;color:var(--muted)">${data.weekly_summary?.total_posts || 0} posts</span></div>
+  <table class="data-table">
+    <tr><th>Day</th><th>Time</th><th>Type</th><th>Priority</th><th>Hook</th><th>CTA</th></tr>
+    ${data.posts.map(p => `<tr>
+      <td style="font-weight:500">${p.day}</td>
+      <td style="color:var(--muted)">${p.time}</td>
+      <td><span class="badge ${typeColors[p.type]||''}">${p.type}</span></td>
+      <td><span class="badge ${prioColors[p.priority]||''}">${p.priority}</span></td>
+      <td style="font-size:12px">${(p.hook||'').replace(/^"|"$/g,'').substring(0,50)}</td>
+      <td style="font-size:12px;color:var(--muted)">${(p.cta||'').substring(0,45)}</td>
+    </tr>`).join('')}
+  </table></div>`;
+  document.getElementById('campaign-content').innerHTML = html;
+}
+
+function renderAnalytics(data) {
+  if (!data) { document.getElementById('analytics-content').innerHTML = '<div class="empty-state"><div class="icon">📊</div><p>No analytics data yet</p></div>'; return; }
+  const m = data.account_metrics || {};
+  const p = data.content_performance || {};
+  const f = data.dm_funnel || {};
+  let html = `<div class="grid-4 section">
+    <div class="stat"><div class="label">Followers Gained</div><div class="value" style="color:var(--accent)">+${m.followers_gained||0}</div><div class="delta">${m.follower_growth_rate||''}</div></div>
+    <div class="stat"><div class="label">Total Reach</div><div class="value">${fmt(m.total_reach||0)}</div></div>
+    <div class="stat"><div class="label">Avg Engagement</div><div class="value">${p.avg_engagement_rate||0}%</div></div>
+    <div class="stat"><div class="label">DM Leads</div><div class="value">${f.new_dms||0}</div><div class="delta">${f.sales_from_social||0} sales</div></div>
+  </div>`;
+  if (data.content_type_breakdown) {
+    const b = data.content_type_breakdown;
+    html += `<div class="card section"><div class="card-header"><h3>Performance by Content Type</h3></div>
+    <table class="data-table"><tr><th>Type</th><th>Posts</th><th>Avg Engagement</th><th>Avg Reach</th></tr>
+    ${Object.entries(b).map(([k,v]) => `<tr>
+      <td><span class="badge badge-${k}">${k.toUpperCase()}</span></td>
+      <td>${v.posts||v.stories||'—'}</td>
+      <td style="color:var(--accent)">${v.avg_engagement||v.avg_views||'—'}%</td>
+      <td>${fmt(v.avg_reach||v.avg_views||0)}</td>
+    </tr>`).join('')}
+    </table></div>`;
+  }
+  if (data.key_insights) {
+    html += `<div class="card"><div class="card-header"><h3>Key Insights</h3></div>
+    <ul class="insight-list">${data.key_insights.map(i => `<li>${i}</li>`).join('')}</ul></div>`;
+  }
+  document.getElementById('analytics-content').innerHTML = html;
+}
+
+function renderOptimization(data) {
+  if (!data) { document.getElementById('optimization-content').innerHTML = '<div class="empty-state"><div class="icon">⚙️</div><p>No optimization data yet</p></div>'; return; }
+  const verdictColors = { excellent:'var(--accent)', good:'var(--accent)', average:'var(--warning)', poor:'var(--danger)' };
+  let html = `<div class="card section"><div class="card-header"><h3>Performance Verdict</h3><span style="font-size:18px;font-weight:800;color:${verdictColors[data.performance_verdict]||'white'}">${(data.performance_verdict||'').toUpperCase()}</span></div>`;
+  if (data.quick_wins) {
+    html += `<div class="card-header" style="margin-top:8px;"><h3>Quick Wins</h3></div>
+    <table class="data-table"><tr><th>Action</th><th>Impact</th><th>Effort</th><th>Timeline</th></tr>
+    ${data.quick_wins.map(w => `<tr>
+      <td style="font-weight:500">${w.action}</td>
+      <td style="color:var(--muted);font-size:12px">${w.expected_impact}</td>
+      <td><span class="badge badge-${w.effort}">${w.effort}</span></td>
+      <td style="color:var(--muted)">${(w.timeline||'').replace(/_/g,' ')}</td>
+    </tr>`).join('')}
+    </table>`;
+  }
+  html += '</div>';
+  if (data.next_week_priorities) {
+    html += `<div class="card"><div class="card-header"><h3>Next Week's Priorities</h3></div>
+    <ol style="padding-left:18px;display:flex;flex-direction:column;gap:8px;">
+    ${data.next_week_priorities.map(p => `<li style="font-size:13px">${p}</li>`).join('')}
+    </ol></div>`;
+  }
+  document.getElementById('optimization-content').innerHTML = html;
+}
+
+// ── Schedule ───────────────────────────────────────────────────────────────
+async function loadSchedule() {
+  const r = await fetch('/api/schedule');
+  const d = await r.json();
+  const badge = document.getElementById('schedule-status-badge');
+  badge.textContent = d.enabled ? 'ACTIVE' : 'DISABLED';
+  badge.className   = `badge ${d.enabled ? 'badge-done' : ''}`;
+
+  const jobsCard = document.getElementById('schedule-jobs-card');
+  if (d.enabled && d.jobs.length) {
+    jobsCard.style.display = '';
+    document.getElementById('schedule-jobs-list').innerHTML =
+      `<table class="data-table"><tr><th>Job</th><th>Next Run</th></tr>
+      ${d.jobs.map(j => `<tr><td>${j.id}</td><td style="color:var(--accent)">${j.next_run?.replace('T',' ').slice(0,16) || '—'}</td></tr>`).join('')}
+      </table>`;
+  } else { jobsCard.style.display = 'none'; }
+}
+
+async function enableSchedule() {
+  const r = await fetch('/api/schedule/enable', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({
+      brand_slug: activeBrand,
+      monitoring_time: document.getElementById('t-monitoring').value,
+      engagement_time:  document.getElementById('t-engagement').value,
+      content_time:     document.getElementById('t-content').value,
+      growth_time:      document.getElementById('t-growth').value,
+      timezone: document.getElementById('tz-select').value,
+    })
+  });
+  const d = await r.json();
+  toast(d.enabled ? '✓ Daily automation enabled' : '⚠ APScheduler not available — install it', d.enabled ? 'success' : 'error');
+  loadSchedule();
+}
+
+async function disableSchedule() {
+  await fetch('/api/schedule/disable', { method: 'POST' });
+  toast('Automation disabled', 'success');
+  loadSchedule();
+}
+
+// ── Utilities ──────────────────────────────────────────────────────────────
+function setText(id, val) { const e = document.getElementById(id); if (e) e.textContent = val; }
+function fmt(n) { return Number(n).toLocaleString(); }
+
+function toast(msg, type = 'success') {
+  const wrap = document.getElementById('toast-wrap');
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  wrap.appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+</script>
+</body>
+</html>
