@@ -8,6 +8,7 @@ without calling real APIs.
 
 import json
 from datetime import datetime
+from typing import Optional
 
 from .base_agent import AgentTool, BaseAgent
 from config.settings import DEFAULT_MODEL, META_ACCESS_TOKEN, RUN_MODE
@@ -17,14 +18,15 @@ from tools.instagram_api import InstagramAPI
 class SchedulerAgent(BaseAgent):
     PANEL_COLOR = "bold white"
 
-    def __init__(self, **kwargs):
+    def __init__(self, brand_profile: Optional[dict] = None, **kwargs):
         super().__init__(
             name="Scheduler Agent  [Publisher]",
             model=DEFAULT_MODEL,
             use_thinking=False,
             **kwargs,
         )
-        self._ig_api = InstagramAPI()
+        # Uses brand-level meta_credentials if present, else falls back to .env
+        self._ig_api = InstagramAPI(brand_profile=brand_profile)
 
     def get_system_prompt(self) -> str:
         return """You are a social media publishing specialist who optimises posting schedules

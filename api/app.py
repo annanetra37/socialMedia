@@ -73,6 +73,14 @@ class ScheduleRequest(BaseModel):
     growth_time: str = "17:00"
     timezone: str = "UTC"
 
+class BrandScheduleRequest(BaseModel):
+    """Per-brand schedule config — used by the agency multi-brand endpoint."""
+    monitoring_time: str = "07:00"
+    engagement_time: str = "08:00"
+    content_time: str = "09:00"
+    growth_time: str = "17:00"
+    timezone: str = "UTC"
+
 
 # ════════════════════════════════════════════════════════════════════════════
 # Helpers
@@ -402,6 +410,30 @@ async def get_result_section(brand_slug: str, section: str):
     return {"section": section, "file": filename, "data": data}
 
 
+@app.get("/api/results/{brand_slug}/content_packages")
+async def get_content_packages(brand_slug: str):
+    """Return every content/visual/reel package for a brand (one per post)."""
+    root = STORAGE_DIR / brand_slug
+    if not root.exists():
+        return {"brand_slug": brand_slug, "packages": []}
+    content_dir = root / "content"
+    visual_dir  = root / "visuals"
+    reel_dir    = root / "reels"
+    packages = []
+    if content_dir.exists():
+        for f in sorted(content_dir.glob("*.json")):
+            post_id = f.stem
+            pkg = {"post_id": post_id, "content": json.loads(f.read_text())}
+            vf = visual_dir / f"{post_id}.json"
+            if vf.exists():
+                pkg["visual"] = json.loads(vf.read_text())
+            rf = reel_dir / f"{post_id}.json"
+            if rf.exists():
+                pkg["reel"] = json.loads(rf.read_text())
+            packages.append(pkg)
+    return {"brand_slug": brand_slug, "packages": packages}
+
+
 @app.get("/api/schedule")
 async def get_schedule():
     return _scheduler.get_status()
@@ -410,21 +442,150 @@ async def get_schedule():
 @app.post("/api/schedule/enable")
 async def enable_schedule(req: ScheduleRequest):
     brand = _load_brand(req.brand_slug)
-    _scheduler.enable(
-        brand=brand,
+    result = _scheduler.enable_brand(
+        brand_profile=brand,
         monitoring_time=req.monitoring_time,
         engagement_time=req.engagement_time,
         content_time=req.content_time,
         growth_time=req.growth_time,
         timezone=req.timezone,
     )
-    return {"enabled": True, "jobs": _scheduler.get_status()}
+    return {"enabled": result.get("ok", False), "status": _scheduler.get_status()}
 
 
 @app.post("/api/schedule/disable")
 async def disable_schedule():
-    _scheduler.disable()
+    _scheduler.disable_all()
     return {"enabled": False}
+
+
+# ── Agency: per-brand schedule management ─────────────────────────────────────
+
+@app.get("/api/agency")
+async def agency_overview():
+    """
+    Return a summary of every known brand with KPIs, schedule status,
+    last run time, and any errors. Powers the agency dashboard.
+    """
+    from storage.data_store import _slug as make_slug
+
+    # Collect all known brand slugs (built-in profiles + storage dirs)
+    known: dict[str, dict] = {}
+
+    for path in BRAND_PROFILES_DIR.glob("*.json"):
+        try:
+            p = json.loads(path.read_text())
+            slug = make_slug(p.get("name", path.stem))
+            known[slug] = {"name": p.get("name"), "industry": p.get("industry"),
+                           "handle": p.get("instagram_handle", p.get("social_media", {}).get("instagram", {}).get("handle", "—")),
+                           "source": "built-in"}
+        except Exception:
+            pass
+
+    if STORAGE_DIR.exists():
+        for brand_dir in STORAGE_DIR.iterdir():
+            bp = brand_dir / "brand_profile.json"
+            if bp.exists():
+                try:
+                    p = json.loads(bp.read_text())
+                    slug = make_slug(p.get("name", brand_dir.name))
+                    if slug not in known:
+                        known[slug] = {"name": p.get("name"), "industry": p.get("industry"),
+                                       "handle": p.get("instagram_handle", "—"), "source": "uploaded"}
+                except Exception:
+                    pass
+
+    schedule_status = _scheduler.get_status()
+    scheduled_brands = {b["brand_slug"]: b for b in schedule_status.get("brands", [])}
+
+    brands_out = []
+    for slug, info in known.items():
+        # Latest KPIs
+        analytics = None
+        optimizations = None
+        analytics_dir = STORAGE_DIR / slug / "analytics"
+        opt_dir       = STORAGE_DIR / slug / "optimizations"
+        if analytics_dir.exists():
+            files = sorted(analytics_dir.glob("*.json"))
+            if files:
+                try:
+                    analytics = json.loads(files[-1].read_text())
+                except Exception:
+                    pass
+        if opt_dir.exists():
+            files = sorted(opt_dir.glob("*.json"))
+            if files:
+                try:
+                    optimizations = json.loads(files[-1].read_text())
+                except Exception:
+                    pass
+
+        # Last run time
+        last_run = None
+        for cat in ("analytics", "optimizations", "engagement"):
+            cat_dir = STORAGE_DIR / slug / cat
+            if cat_dir.exists():
+                files = sorted(cat_dir.glob("*.json"))
+                if files:
+                    last_run = files[-1].stem.split("_")[0]
+                    break
+
+        sched = scheduled_brands.get(slug, {})
+        brands_out.append({
+            "slug": slug,
+            "name": info["name"],
+            "industry": info.get("industry"),
+            "handle": info.get("handle"),
+            "source": info.get("source"),
+            "scheduled": bool(sched),
+            "schedule": sched.get("times"),
+            "next_runs": sched.get("jobs", []),
+            "timezone": sched.get("timezone"),
+            "last_run": last_run,
+            "kpis": {
+                "followers_gained": (analytics or {}).get("account_metrics", {}).get("followers_gained", "—"),
+                "engagement_rate":  (analytics or {}).get("content_performance", {}).get("avg_engagement_rate", "—"),
+                "hot_leads":        (analytics or {}).get("dm_funnel", {}).get("new_dms", "—"),
+                "verdict":          (optimizations or {}).get("performance_verdict", "—"),
+            },
+        })
+
+    return {
+        "total_brands": len(brands_out),
+        "scheduled_brands": len(scheduled_brands),
+        "brands": brands_out,
+    }
+
+
+@app.post("/api/brands/{brand_slug}/schedule/enable")
+async def enable_brand_schedule(brand_slug: str, req: BrandScheduleRequest):
+    """Enable daily automation for a single brand."""
+    brand = _load_brand(brand_slug)
+    result = _scheduler.enable_brand(
+        brand_profile=brand,
+        monitoring_time=req.monitoring_time,
+        engagement_time=req.engagement_time,
+        content_time=req.content_time,
+        growth_time=req.growth_time,
+        timezone=req.timezone,
+    )
+    return result
+
+
+@app.post("/api/brands/{brand_slug}/schedule/disable")
+async def disable_brand_schedule(brand_slug: str):
+    """Disable daily automation for a single brand."""
+    _scheduler.disable_brand(brand_slug)
+    return {"disabled": True, "brand_slug": brand_slug}
+
+
+@app.get("/api/brands/{brand_slug}/schedule")
+async def get_brand_schedule(brand_slug: str):
+    """Get schedule status for a single brand."""
+    status = _scheduler.get_brand_status(brand_slug)
+    if status is None:
+        return {"brand_slug": brand_slug, "scheduled": False}
+    return {"brand_slug": brand_slug, "scheduled": True, **status}
 
 
 # ════════════════════════════════════════════════════════════════════════════

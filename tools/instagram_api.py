@@ -1,8 +1,16 @@
 """
 Instagram / Meta Graph API wrapper.
 
-In live mode: makes real API calls to Meta Graph API v19.
-In demo mode: returns mock responses so the system can run without API credentials.
+Supports per-brand credentials from the brand profile JSON:
+  brand_profile["meta_credentials"] = {
+      "access_token": "EAA...",
+      "instagram_business_account_id": "17841...",
+      "app_id": "...",
+      "app_secret": "..."
+  }
+
+Falls back to global .env variables when brand-level credentials are absent.
+In demo mode (RUN_MODE=demo) or when no token is set: returns mock data.
 
 Docs: https://developers.facebook.com/docs/instagram-api
 """
@@ -24,9 +32,21 @@ from config.settings import (
 class InstagramAPI:
     BASE_URL = "https://graph.facebook.com/v19.0"
 
-    def __init__(self):
-        self.account_id = INSTAGRAM_BUSINESS_ACCOUNT_ID
-        self.access_token = META_ACCESS_TOKEN
+    def __init__(self, brand_profile: Optional[dict] = None):
+        """
+        Priority for credentials:
+          1. brand_profile["meta_credentials"]  (per-client credentials)
+          2. Global .env vars                   (fallback / single-brand use)
+        """
+        creds = (brand_profile or {}).get("meta_credentials", {})
+        self.access_token = creds.get("access_token") or META_ACCESS_TOKEN
+        self.account_id   = creds.get("instagram_business_account_id") or INSTAGRAM_BUSINESS_ACCOUNT_ID
+        self.app_id       = creds.get("app_id", "")
+        self.app_secret   = creds.get("app_secret", "")
+
+    @property
+    def _has_credentials(self) -> bool:
+        return bool(self.access_token and self.account_id)
 
     # ── Media Publishing ───────────────────────────────────────────────────────
 
@@ -38,7 +58,7 @@ class InstagramAPI:
         is_carousel_item: bool = False,
     ) -> dict:
         """Create a media container (step 1 of 2-step publishing)."""
-        if RUN_MODE == "demo" or not self.access_token:
+        if RUN_MODE == "demo" or not self._has_credentials:
             return {"id": f"mock_container_{int(time.time())}", "status": "demo"}
 
         endpoint = f"{self.BASE_URL}/{self.account_id}/media"
@@ -60,7 +80,7 @@ class InstagramAPI:
 
     def publish_media(self, container_id: str) -> dict:
         """Publish a media container (step 2 of 2-step publishing)."""
-        if RUN_MODE == "demo" or not self.access_token:
+        if RUN_MODE == "demo" or not self._has_credentials:
             return {"id": f"mock_post_{int(time.time())}", "status": "demo_published"}
 
         endpoint = f"{self.BASE_URL}/{self.account_id}/media_publish"
@@ -76,7 +96,7 @@ class InstagramAPI:
         Schedule or immediately publish a post.
         In live mode uses Meta's content_publishing_limit endpoint.
         """
-        if RUN_MODE == "demo" or not self.access_token:
+        if RUN_MODE == "demo" or not self._has_credentials:
             return {
                 "status": "demo_scheduled",
                 "post_id": post_data.get("post_id"),
@@ -113,7 +133,7 @@ class InstagramAPI:
         until: Optional[str] = None,
     ) -> dict:
         """Fetch account-level insights from Instagram Insights API."""
-        if RUN_MODE == "demo" or not self.access_token:
+        if RUN_MODE == "demo" or not self._has_credentials:
             return self._mock_account_insights(metrics)
 
         endpoint = f"{self.BASE_URL}/{self.account_id}/insights"
@@ -132,7 +152,7 @@ class InstagramAPI:
 
     def get_post_insights(self, post_id: str, metrics: list[str]) -> dict:
         """Fetch insights for a specific post."""
-        if RUN_MODE == "demo" or not self.access_token:
+        if RUN_MODE == "demo" or not self._has_credentials:
             return self._mock_post_insights(post_id, metrics)
 
         endpoint = f"{self.BASE_URL}/{post_id}/insights"
@@ -145,7 +165,7 @@ class InstagramAPI:
 
     def get_media_list(self, limit: int = 25) -> dict:
         """Get recent media posts."""
-        if RUN_MODE == "demo" or not self.access_token:
+        if RUN_MODE == "demo" or not self._has_credentials:
             return self._mock_media_list()
 
         endpoint = f"{self.BASE_URL}/{self.account_id}/media"
@@ -159,7 +179,7 @@ class InstagramAPI:
 
     def get_comments(self, media_id: str, limit: int = 50) -> dict:
         """Get comments on a specific post."""
-        if RUN_MODE == "demo" or not self.access_token:
+        if RUN_MODE == "demo" or not self._has_credentials:
             return self._mock_comments()
 
         endpoint = f"{self.BASE_URL}/{media_id}/comments"
@@ -173,7 +193,7 @@ class InstagramAPI:
 
     def reply_to_comment(self, media_id: str, comment_id: str, reply_text: str) -> dict:
         """Reply to a comment."""
-        if RUN_MODE == "demo" or not self.access_token:
+        if RUN_MODE == "demo" or not self._has_credentials:
             return {"status": "demo_replied", "comment_id": comment_id}
 
         endpoint = f"{self.BASE_URL}/{media_id}/replies"
