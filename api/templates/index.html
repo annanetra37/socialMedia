@@ -892,7 +892,29 @@ tr:hover td { background: rgba(108,99,255,.04); }
         <div class="form-row">
           <div class="form-group">
             <label class="form-label">Industry</label>
-            <input type="text" class="form-input" id="bf-industry" placeholder="e.g. E-commerce / Fashion">
+            <select class="form-select" id="bf-industry" onchange="onIndustryChange(this.value)">
+              <option value="">— Select industry —</option>
+              <option value="Fashion & Apparel">Fashion & Apparel</option>
+              <option value="Beauty & Skincare">Beauty & Skincare</option>
+              <option value="Fitness & Wellness">Fitness & Wellness</option>
+              <option value="Food & Beverage">Food & Beverage</option>
+              <option value="Restaurant & Cafe">Restaurant & Cafe</option>
+              <option value="Travel & Hospitality">Travel & Hospitality</option>
+              <option value="Technology & SaaS">Technology & SaaS</option>
+              <option value="E-commerce & Retail">E-commerce & Retail</option>
+              <option value="Health & Medical">Health & Medical</option>
+              <option value="Education & Online Courses">Education & Online Courses</option>
+              <option value="Real Estate">Real Estate</option>
+              <option value="Finance & Fintech">Finance & Fintech</option>
+              <option value="Luxury & Premium Goods">Luxury & Premium Goods</option>
+              <option value="Home & Interior Design">Home & Interior Design</option>
+              <option value="Art & Creative Services">Art & Creative Services</option>
+              <option value="Automotive">Automotive</option>
+              <option value="Sports & Athletics">Sports & Athletics</option>
+              <option value="Entertainment & Media">Entertainment & Media</option>
+              <option value="Pet & Animal Care">Pet & Animal Care</option>
+              <option value="Non-Profit & Social Cause">Non-Profit & Social Cause</option>
+            </select>
           </div>
           <div class="form-group">
             <label class="form-label">Website</label>
@@ -910,8 +932,11 @@ tr:hover td { background: rgba(108,99,255,.04); }
           </div>
         </div>
         <div class="form-group">
-          <label class="form-label">Brand Voice</label>
-          <textarea class="form-input" id="bf-voice" rows="3" placeholder="Describe your brand's tone and style — elegant, playful, educational, etc."></textarea>
+          <label class="form-label" style="display:flex;justify-content:space-between;">
+            Brand Voice
+            <span id="bf-voice-hint" style="font-size:10px;color:var(--accent);font-weight:400;display:none;">✓ Auto-filled — edit freely</span>
+          </label>
+          <textarea class="form-input" id="bf-voice" rows="4" placeholder="Select an industry above to auto-fill, or describe your brand's tone and style manually."></textarea>
         </div>
         <div class="form-group">
           <label class="form-label">Brand Values (comma-separated)</label>
@@ -2399,6 +2424,38 @@ function toast(msg, type='info') {
   }, 3500);
 }
 
+// ═══════════════════ INDUSTRY → BRAND VOICE MAP ═══════════════════
+const INDUSTRY_VOICES = {
+  'Fashion & Apparel': 'Trend-forward and aspirational. We celebrate self-expression and personal style. Visual-first storytelling with an emphasis on lifestyle aesthetics. Confident, chic, and inclusive — fashion is for everyone.',
+  'Beauty & Skincare': 'Empowering and educational. We demystify beauty routines and celebrate natural confidence. Warm, relatable, and science-backed when needed. Never pushy — we inspire transformation, inside and out.',
+  'Fitness & Wellness': 'Motivational and community-driven. We celebrate every step of the fitness journey, not just the destination. Energetic, supportive, and results-focused. We push limits while staying approachable and real.',
+  'Food & Beverage': 'Sensory and indulgent. We make mouths water and spark cravings through vivid storytelling. Warm, playful, and passionate about ingredients, craft, and culture. Food is an experience — we tell that story.',
+  'Restaurant & Cafe': 'Warm, inviting, and community-rooted. We celebrate the joy of gathering over great food and drink. Local, authentic, and seasonal. Every dish and every table has a story worth sharing.',
+  'Travel & Hospitality': 'Wanderlust-inducing and experiential. We paint vivid pictures of places, people, and unforgettable moments. Inspiring, adventurous, and culturally respectful. Every destination has a story — we help you live it.',
+  'Technology & SaaS': 'Clear, smart, and benefit-driven. We translate complex technology into real-world value. Authoritative but never jargon-heavy. Forward-thinking, innovative, and relentlessly customer-focused.',
+  'E-commerce & Retail': 'Customer-centric and product-passionate. We spotlight value, quality, and the joy of a great find. Friendly, honest, and helpful without being pushy. Shopping should feel exciting — we make it that way.',
+  'Health & Medical': 'Trustworthy and compassionate. We prioritize accuracy, clarity, and patient well-being above all. Professional tone balanced with empathy. Evidence-based, never alarmist. Health decisions deserve the best information.',
+  'Education & Online Courses': 'Empowering and growth-oriented. We believe in lifelong learning and the potential in every student. Encouraging, clear, and results-focused. We break down complex topics into insights anyone can act on.',
+  'Real Estate': 'Premium and trust-driven. We help people find their perfect home or next great investment. Professional, aspirational, and community-focused. Detailed, honest, and visually compelling — property is personal.',
+  'Finance & Fintech': 'Credible and empowering. We demystify money and make financial literacy accessible to everyone. Clear, jargon-free, and radically transparent. We build trust through consistent education and honesty.',
+  'Luxury & Premium Goods': 'Refined and exclusive. We speak to discerning tastes and a deep appreciation for timeless quality. Understated confidence — we never shout, we suggest. Craftsmanship, heritage, and rarity are at our core.',
+  'Home & Interior Design': 'Aesthetic and aspirational. We curate spaces that reflect personality, lifestyle, and well-being. Warm, expert-led, and trend-aware. We believe great design is not a luxury — it is a way of living.',
+  'Art & Creative Services': 'Expressive, bold, and unapologetically original. We celebrate creativity in all its forms. Authentic, unconventional, and visually daring. We do not follow trends — we question them and set new ones.',
+  'Automotive': 'Dynamic and performance-driven. We capture the thrill of engineering and the freedom of the open road. Passionate, technically credible, and aspirational. We sell experiences and emotions as much as vehicles.',
+  'Sports & Athletics': 'High-energy and community-driven. We fuel passion for sport, competition, and athletic achievement. Bold, action-oriented, and real. We celebrate effort, resilience, and the pursuit of personal bests.',
+  'Entertainment & Media': 'Engaging, culturally sharp, and always in the moment. We tap into trends, emotions, and conversations that matter. Witty, timely, and audience-first. Entertainment is our currency — attention is our craft.',
+  'Pet & Animal Care': 'Heartwarming and deeply trustworthy. We celebrate the extraordinary bond between pets and their humans. Friendly, caring, and expert-backed. Every animal deserves the best — we help make that possible.',
+  'Non-Profit & Social Cause': 'Mission-driven and emotionally resonant. We inspire action through authentic storytelling and proof of impact. Compassionate, urgent when necessary, and always genuine. Every supporter is a change-maker.',
+};
+
+function onIndustryChange(industry) {
+  const voice = INDUSTRY_VOICES[industry] || '';
+  const voiceEl = document.getElementById('bf-voice');
+  const hintEl = document.getElementById('bf-voice-hint');
+  if (voiceEl) voiceEl.value = voice;
+  if (hintEl) hintEl.style.display = voice ? 'inline' : 'none';
+}
+
 // ═══════════════════ BRAND FORM (multi-step wizard) ═══════════════════
 const BF_STEPS = ['Basic Info','Credentials','Audience','Products','Goals'];
 let _bfStep = 1;
@@ -2414,6 +2471,8 @@ function openBrandForm() {
     if (el) el.value = '';
   });
   ['bf-followers'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  document.getElementById('bf-industry').value = '';
+  document.getElementById('bf-voice-hint').style.display = 'none';
   document.getElementById('bf-gender').value = 'all genders';
   document.getElementById('bf-reel').value = 40;
   document.getElementById('bf-carousel').value = 30;
