@@ -8,8 +8,30 @@ competitor activity to surface timely content opportunities.
 import json
 from datetime import datetime
 
+import requests
+
 from .base_agent import AgentTool, BaseAgent
-from config.settings import DEFAULT_MODEL, RUN_MODE
+from config.settings import DEFAULT_MODEL, RUN_MODE, RAPIDAPI_KEY
+
+# ── RapidAPI: Instagram Scraper 20251 ─────────────────────────────────────────
+_RAPIDAPI_HOST = "instagram-scraper-20251.p.rapidapi.com"
+_RAPIDAPI_BASE = f"https://{_RAPIDAPI_HOST}"
+_RAPIDAPI_HEADERS = {
+    "X-RapidAPI-Key": RAPIDAPI_KEY,
+    "X-RapidAPI-Host": _RAPIDAPI_HOST,
+}
+
+
+def _ig_get(path: str, params: dict) -> dict:
+    """GET request to Instagram Scraper 20251 API with 10s timeout."""
+    r = requests.get(
+        f"{_RAPIDAPI_BASE}{path}",
+        headers=_RAPIDAPI_HEADERS,
+        params=params,
+        timeout=10,
+    )
+    r.raise_for_status()
+    return r.json()
 
 
 class TrendResearchAgent(BaseAgent):
@@ -195,21 +217,96 @@ Output a JSON block with this structure:
     @staticmethod
     def _fetch_trending_hashtags(inputs: dict) -> dict:
         niche = inputs.get("niche", "jewellery")
+        limit = inputs.get("limit", 20)
+
+        if not RAPIDAPI_KEY:
+            return {"niche": niche, "source": "mock_no_key", "trending": [], "saturated_avoid": []}
+
+        # Search for the niche hashtag + related ones
+        results = []
+        seen = set()
+
+        # Primary hashtag
+        primary_tag = niche.lower().replace(" ", "").replace("&", "").replace("/", "")
+        candidate_tags = [primary_tag]
+
+        # Derive 4-5 related tags from the niche phrase
+        words = niche.lower().replace("/", " ").replace("&", " ").split()
+        for w in words:
+            w = w.strip()
+            if len(w) > 3:
+                candidate_tags.append(w)
+
+        for tag in candidate_tags[:5]:
+            clean_tag = tag.lstrip("#")
+            if clean_tag in seen:
+                continue
+            seen.add(clean_tag)
+            try:
+                data = _ig_get("/v1/hashtag", {"name": clean_tag})
+                # API returns data in various shapes — normalise
+                info = data.get("data") or data.get("hashtag") or data
+                media_count = (
+                    info.get("media_count")
+                    or info.get("edge_hashtag_to_media", {}).get("count")
+                    or info.get("post_count")
+                    or 0
+                )
+                # Format post count
+                count_str = (
+                    f"{media_count/1_000_000:.1f}M" if media_count >= 1_000_000
+                    else f"{media_count/1_000:.0f}K" if media_count >= 1_000
+                    else str(media_count)
+                )
+                results.append({
+                    "tag": f"#{clean_tag}",
+                    "posts": count_str,
+                    "raw_count": media_count,
+                })
+
+                # Pull related hashtags from the response if available
+                related = (
+                    info.get("related_hashtags")
+                    or info.get("edge_hashtag_to_related_hashtags", {}).get("edges", [])
+                    or []
+                )
+                for rel in related[:4]:
+                    rel_name = rel.get("node", {}).get("name") or rel.get("name") or rel
+                    if isinstance(rel_name, str) and rel_name not in seen:
+                        seen.add(rel_name)
+                        try:
+                            rd = _ig_get("/v1/hashtag", {"name": rel_name})
+                            ri = rd.get("data") or rd.get("hashtag") or rd
+                            rc = (
+                                ri.get("media_count")
+                                or ri.get("edge_hashtag_to_media", {}).get("count")
+                                or ri.get("post_count")
+                                or 0
+                            )
+                            rc_str = (
+                                f"{rc/1_000_000:.1f}M" if rc >= 1_000_000
+                                else f"{rc/1_000:.0f}K" if rc >= 1_000
+                                else str(rc)
+                            )
+                            results.append({"tag": f"#{rel_name}", "posts": rc_str, "raw_count": rc})
+                        except Exception:
+                            results.append({"tag": f"#{rel_name}", "posts": "—", "raw_count": 0})
+
+            except Exception as exc:
+                results.append({"tag": f"#{clean_tag}", "posts": "error", "raw_count": 0, "error": str(exc)})
+
+        # Sort by post count descending, take limit
+        results.sort(key=lambda x: x.get("raw_count", 0), reverse=True)
+        results = results[:limit]
+
+        # Flag likely-saturated tags (>50M posts)
+        saturated = [r["tag"] for r in results if r.get("raw_count", 0) > 50_000_000]
+
         return {
             "niche": niche,
-            "trending": [
-                {"tag": "#nordicjewellery", "posts": "180K", "growth": "+12%"},
-                {"tag": "#handmadejewellery", "posts": "4.2M", "growth": "+3%"},
-                {"tag": "#silversmith", "posts": "920K", "growth": "+8%"},
-                {"tag": "#artisanjewellery", "posts": "1.1M", "growth": "+5%"},
-                {"tag": "#vikingfashion", "posts": "340K", "growth": "+22%"},
-                {"tag": "#norsestyle", "posts": "210K", "growth": "+18%"},
-                {"tag": "#scandinaviandesign", "posts": "2.8M", "growth": "+4%"},
-                {"tag": "#slowjewellery", "posts": "90K", "growth": "+35%"},
-                {"tag": "#ethicaljewellery", "posts": "280K", "growth": "+15%"},
-                {"tag": "#giftsforher", "posts": "8.9M", "growth": "+2%"},
-            ],
-            "saturated_avoid": ["#jewellery", "#fashion", "#style"],
+            "source": "instagram_scraper_20251",
+            "trending": results,
+            "saturated_avoid": saturated,
         }
 
     @staticmethod
@@ -252,36 +349,92 @@ Output a JSON block with this structure:
     @staticmethod
     def _fetch_competitor_recent_posts(inputs: dict) -> dict:
         handle = inputs.get("handle", "@competitor")
-        return {
-            "handle": handle,
-            "top_posts_last_7_days": [
-                {
-                    "type": "reel",
-                    "description": "Crafting process — hammer and anvil",
-                    "likes": 1840,
-                    "comments": 92,
-                    "shares": 234,
-                    "saves": 680,
-                },
-                {
-                    "type": "carousel",
-                    "description": "7 meanings behind Norse rune symbols",
-                    "likes": 1220,
-                    "comments": 156,
-                    "shares": 89,
-                    "saves": 1100,
-                },
-                {
-                    "type": "image",
-                    "description": "Product flat lay — white marble",
-                    "likes": 480,
-                    "comments": 22,
-                    "shares": 12,
-                    "saves": 95,
-                },
-            ],
-            "insight": "Reels and educational carousels massively outperform static images",
-        }
+        username = handle.lstrip("@")
+
+        if not RAPIDAPI_KEY:
+            return {"handle": handle, "source": "mock_no_key", "top_posts": [], "profile": {}}
+
+        try:
+            # Fetch user profile
+            profile_data = _ig_get("/v1/user/info", {"username": username})
+            profile_info = profile_data.get("data") or profile_data.get("user") or profile_data
+            followers = (
+                profile_info.get("follower_count")
+                or profile_info.get("edge_followed_by", {}).get("count")
+                or profile_info.get("followers")
+                or "—"
+            )
+            bio = profile_info.get("biography") or profile_info.get("bio") or ""
+
+            # Fetch recent posts
+            posts_data = _ig_get("/v1/user/posts", {"username": username})
+            raw_posts = (
+                posts_data.get("data", {}).get("items")
+                or posts_data.get("items")
+                or posts_data.get("data")
+                or []
+            )
+
+            top_posts = []
+            for p in raw_posts[:12]:
+                node = p.get("node") or p
+                media_type = (
+                    node.get("media_type")
+                    or node.get("__typename", "")
+                    .replace("GraphImage", "image")
+                    .replace("GraphVideo", "reel")
+                    .replace("GraphSidecar", "carousel")
+                ).lower()
+                likes = (
+                    node.get("like_count")
+                    or node.get("edge_liked_by", {}).get("count")
+                    or node.get("likes_count")
+                    or 0
+                )
+                comments = (
+                    node.get("comment_count")
+                    or node.get("edge_media_to_comment", {}).get("count")
+                    or node.get("comments_count")
+                    or 0
+                )
+                caption_raw = (
+                    node.get("caption")
+                    or node.get("edge_media_to_caption", {}).get("edges", [{}])[0]
+                       .get("node", {}).get("text")
+                    or ""
+                )
+                caption = caption_raw[:120] if isinstance(caption_raw, str) else ""
+                top_posts.append({
+                    "type": media_type or "unknown",
+                    "caption_preview": caption,
+                    "likes": likes,
+                    "comments": comments,
+                    "engagement": likes + comments,
+                })
+
+            # Sort by engagement
+            top_posts.sort(key=lambda x: x["engagement"], reverse=True)
+
+            return {
+                "handle": handle,
+                "source": "instagram_scraper_20251",
+                "profile": {"followers": followers, "bio": bio},
+                "top_posts_last_12": top_posts[:8],
+                "best_post_type": top_posts[0]["type"] if top_posts else "unknown",
+                "avg_likes": (
+                    round(sum(p["likes"] for p in top_posts) / len(top_posts))
+                    if top_posts else 0
+                ),
+            }
+
+        except Exception as exc:
+            return {
+                "handle": handle,
+                "source": "instagram_scraper_20251",
+                "error": str(exc),
+                "top_posts_last_12": [],
+                "note": "Competitor data unavailable — private account or API limit reached",
+            }
 
     @staticmethod
     def _fetch_trending_audio(inputs: dict) -> dict:
