@@ -29,7 +29,7 @@ from typing import Any, Optional
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -620,6 +620,113 @@ async def get_brand_schedule(brand_slug: str):
     if status is None:
         return {"brand_slug": brand_slug, "scheduled": False}
     return {"brand_slug": brand_slug, "scheduled": True, **status}
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# OAuth — Instagram / Meta connection
+# ════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/oauth/connect/{brand_slug}")
+async def oauth_connect(brand_slug: str, request: Request):
+    """
+    Redirect the user to the Meta OAuth dialog.
+    After approving, Meta sends them back to /api/oauth/callback.
+    """
+    from api.oauth import get_oauth_url
+    from config.settings import META_APP_ID
+    if not META_APP_ID:
+        raise HTTPException(
+            status_code=400,
+            detail="META_APP_ID is not set. Add it to your .env file first."
+        )
+    redirect_uri = str(request.base_url).rstrip("/") + "/api/oauth/callback"
+    url = get_oauth_url(brand_slug, redirect_uri)
+    _glog(f"OAuth flow started for brand='{brand_slug}'")
+    return RedirectResponse(url)
+
+
+@app.get("/api/oauth/callback")
+async def oauth_callback(
+    request: Request,
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+    error_description: Optional[str] = None,
+):
+    """
+    Meta OAuth callback.
+    Exchanges code → long-lived token → fetches IG account ID → saves to brand profile.
+    Redirects back to the UI with ?oauth=success or ?oauth=error.
+    """
+    if error:
+        msg = error_description or error
+        _glog(f"OAuth denied/error for brand='{state}': {msg}")
+        return RedirectResponse(f"/?oauth=error&msg={msg[:120]}")
+
+    if not code or not state:
+        return RedirectResponse("/?oauth=error&msg=missing_code_or_state")
+
+    brand_slug = state
+    redirect_uri = str(request.base_url).rstrip("/") + "/api/oauth/callback"
+
+    try:
+        from api.oauth import exchange_code_for_token, fetch_instagram_account, save_credentials_to_brand
+
+        _glog(f"OAuth: exchanging code for brand='{brand_slug}'...")
+        token_data = exchange_code_for_token(code, redirect_uri)
+
+        _glog(f"OAuth: fetching Instagram account for brand='{brand_slug}'...")
+        account_data = fetch_instagram_account(token_data["access_token"])
+
+        save_credentials_to_brand(brand_slug, token_data, account_data)
+        _glog(
+            f"OAuth SUCCESS: brand='{brand_slug}' "
+            f"ig_account={account_data['instagram_account_id']} "
+            f"token_expires_in={token_data.get('expires_in_days', '?')}d"
+        )
+        return RedirectResponse(
+            f"/?oauth=success&brand={brand_slug}"
+            f"&ig={account_data['instagram_account_id']}"
+        )
+
+    except Exception as exc:
+        _glog(f"OAuth FAILED for brand='{brand_slug}': {exc}")
+        safe_msg = str(exc)[:150].replace("&", "and")
+        return RedirectResponse(f"/?oauth=error&brand={brand_slug}&msg={safe_msg}")
+
+
+@app.get("/api/brands/{brand_slug}/oauth/status")
+async def brand_oauth_status(brand_slug: str):
+    """Return the Instagram connection status for a brand."""
+    try:
+        profile = _load_brand(brand_slug)
+        from api.oauth import get_token_status
+        return get_token_status(profile)
+    except Exception:
+        return {"status": "not_connected", "label": "Not Connected", "ig_account_id": None}
+
+
+# ── Background token refresh (runs every 12 hours) ────────────────────────────
+
+def _auto_refresh_tokens() -> None:
+    """Check all brands and refresh any token expiring within 7 days."""
+    try:
+        from api.oauth import refresh_all_expiring_tokens
+        refreshed = refresh_all_expiring_tokens(glog_fn=_glog)
+        if refreshed:
+            _glog(f"Auto-refresh: refreshed tokens for {len(refreshed)} brand(s): {', '.join(refreshed)}")
+    except Exception as exc:
+        _glog(f"Auto-refresh error: {exc}")
+
+
+@app.on_event("startup")
+async def _start_token_refresh_job():
+    from apscheduler.schedulers.background import BackgroundScheduler as _BGScheduler
+    _bg = _BGScheduler()
+    _bg.add_job(_auto_refresh_tokens, "interval", hours=12, id="token_refresh",
+                misfire_grace_time=3600)
+    _bg.start()
+    _glog("Token refresh scheduler started (runs every 12h)")
 
 
 # ════════════════════════════════════════════════════════════════════════════

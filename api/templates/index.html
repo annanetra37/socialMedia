@@ -946,7 +946,19 @@ tr:hover td { background: rgba(108,99,255,.04); }
 
       <!-- Step 2: Meta / Instagram Credentials -->
       <div id="bf-step-2" style="display:none;">
-        <div class="cred-note">These credentials are needed for real Instagram posting. Leave blank to stay in demo mode — you can add them later by re-uploading the brand profile.</div>
+        <!-- OAuth connect option -->
+        <div style="background:rgba(108,99,255,.08);border:1px solid rgba(108,99,255,.25);border-radius:10px;padding:16px 18px;margin-bottom:18px;">
+          <div style="font-size:13px;font-weight:600;margin-bottom:6px;">Recommended: Connect via OAuth</div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.6;">
+            Save your brand first, then use the <strong style="color:var(--text);">Connect Instagram</strong> button in the Brands list.
+            This is the secure way — your client logs in directly via Facebook, no token copy-pasting needed.
+          </div>
+          <div style="font-size:11px;color:var(--muted);">Requires <code style="background:rgba(255,255,255,.07);padding:1px 5px;border-radius:3px;">META_APP_ID</code> and <code style="background:rgba(255,255,255,.07);padding:1px 5px;border-radius:3px;">META_APP_SECRET</code> in your <code style="background:rgba(255,255,255,.07);padding:1px 5px;border-radius:3px;">.env</code></div>
+        </div>
+
+        <!-- Manual fallback -->
+        <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px;">— Or enter credentials manually —</div>
+        <div class="cred-note">These are needed for real Instagram posting. Leave blank to stay in demo mode. You can always connect later from the Brands page.</div>
         <div class="form-group">
           <label class="form-label">Meta Access Token</label>
           <input type="password" class="form-input" id="bf-token" placeholder="EAAxxxxxxx...">
@@ -2144,31 +2156,66 @@ async function loadBrandsList() {
     const r = await fetch('/api/brands');
     if (!r.ok) throw new Error();
     const data = await r.json();
-    renderBrandsList(data.brands||[]);
+    const brands = data.brands || [];
+    // Fetch OAuth status for each brand in parallel
+    const statuses = await Promise.all(
+      brands.map(b => fetch(`/api/brands/${b.slug}/oauth/status`)
+        .then(r => r.ok ? r.json() : {status:'not_connected',label:'Not Connected'})
+        .catch(() => ({status:'not_connected',label:'Not Connected'}))
+      )
+    );
+    renderBrandsList(brands, statuses);
   } catch(e) {
     document.getElementById('brands-table').innerHTML = emptyState('🏷','Could not load brands','');
   }
 }
 
-function renderBrandsList(brands) {
+function renderBrandsList(brands, statuses=[]) {
   const el = document.getElementById('brands-table');
   if (!brands.length) {
-    el.innerHTML = emptyState('🏷','No brands loaded','Upload a brand JSON file above');
+    el.innerHTML = emptyState('🏷','No brands yet','Click "+ New Brand" above to add your first brand');
     return;
   }
+  const statusColors = {
+    connected: 'var(--accent)',
+    expiring_soon: 'var(--warning)',
+    expired: 'var(--danger)',
+    not_connected: 'var(--muted)',
+  };
   el.innerHTML = `<table>
-    <thead><tr><th>Name</th><th>Slug</th><th>Industry</th><th>Instagram</th><th>Target Audience</th><th>Actions</th></tr></thead>
-    <tbody>${brands.map(b => `
-      <tr>
-        <td><strong>${esc(b.name)}</strong></td>
-        <td><code style="font-size:11px;color:var(--muted)">${esc(b.slug)}</code></td>
-        <td><span class="badge badge-muted">${esc(b.industry||'—')}</span></td>
-        <td>${esc(b.instagram_handle||'—')}</td>
-        <td style="font-size:12px;color:var(--muted);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(b.target_audience||'—')}</td>
+    <thead><tr>
+      <th>Brand</th><th>Industry</th><th>Instagram</th>
+      <th>Instagram Connection</th><th>Actions</th>
+    </tr></thead>
+    <tbody>${brands.map((b, i) => {
+      const st = statuses[i] || {status:'not_connected', label:'Not Connected'};
+      const dotColor = statusColors[st.status] || 'var(--muted)';
+      const connectLabel = st.status === 'not_connected' ? 'Connect Instagram'
+        : st.status === 'expired' ? '🔄 Reconnect'
+        : st.status === 'expiring_soon' ? '🔄 Refresh Token'
+        : '🔄 Reconnect';
+      return `<tr>
         <td>
-          <button class="btn btn-ghost btn-sm" onclick="selectBrand('${b.slug}','${esc(b.name)}');showSection('dashboard');">View</button>
+          <strong>${esc(b.name)}</strong>
+          <div style="font-size:11px;color:var(--muted);font-family:monospace;">${esc(b.slug)}</div>
         </td>
-      </tr>`).join('')}</tbody>
+        <td><span class="badge badge-muted" style="font-size:10px;">${esc(b.industry||'—')}</span></td>
+        <td style="font-size:12px;">${esc(b.instagram_handle||'—')}</td>
+        <td>
+          <div style="display:flex;align-items:center;gap:7px;">
+            <div style="width:8px;height:8px;border-radius:50%;background:${dotColor};flex-shrink:0;${st.status==='connected'?'box-shadow:0 0 5px '+dotColor+';':''}"></div>
+            <span style="font-size:12px;color:${dotColor};">${esc(st.label)}</span>
+          </div>
+          ${st.ig_account_id ? `<div style="font-size:10px;color:var(--muted);font-family:monospace;margin-top:2px;">${esc(st.ig_account_id)}</div>` : ''}
+        </td>
+        <td>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <button class="btn btn-ghost btn-sm" onclick="selectBrand('${b.slug}','${esc(b.name)}');showSection('dashboard');">View</button>
+            <a class="btn btn-primary btn-sm" href="/api/oauth/connect/${b.slug}" title="Authorize via Facebook OAuth">${connectLabel}</a>
+          </div>
+        </td>
+      </tr>`;
+    }).join('')}</tbody>
   </table>`;
 }
 
@@ -2722,11 +2769,35 @@ function clearGlog() {
   document.getElementById('log-count').textContent = '0';
 }
 
+// ═══════════════════ OAUTH REDIRECT HANDLER ═══════════════════
+function handleOAuthRedirect() {
+  const params = new URLSearchParams(window.location.search);
+  const oauthResult = params.get('oauth');
+  if (!oauthResult) return;
+
+  // Clean URL so refresh doesn't re-trigger the toast
+  window.history.replaceState({}, '', '/');
+
+  if (oauthResult === 'success') {
+    const brand = params.get('brand') || '';
+    const ig = params.get('ig') || '';
+    toast(`Instagram connected${brand ? ' for ' + brand : ''}!${ig ? ' (ID: '+ig+')' : ''}`, 'success');
+    // Navigate to brands section to show status
+    showSection('brands');
+    loadBrandsList();
+  } else if (oauthResult === 'error') {
+    const msg = params.get('msg') || 'Unknown error';
+    toast('Instagram connection failed: ' + msg, 'error');
+    showSection('brands');
+  }
+}
+
 // ═══════════════════ BOOTSTRAP ═══════════════════
 document.addEventListener('DOMContentLoaded', () => {
   showSection('agency');
   init();
   connectGlobalLog();
+  handleOAuthRedirect();
 });
 </script>
 </body>
