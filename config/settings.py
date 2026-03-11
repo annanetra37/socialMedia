@@ -20,8 +20,8 @@ DEFAULT_MODEL = "claude-opus-4-6"           # Opus 4.6 — most capable
 FAST_MODEL = "claude-haiku-4-5"             # Haiku 4.5 — for quick tasks
 
 # ── Meta / Instagram ──────────────────────────────────────────────────────────
-META_ACCESS_TOKEN = os.getenv("META_ACCESS_TOKEN", "")
-INSTAGRAM_BUSINESS_ACCOUNT_ID = os.getenv("INSTAGRAM_BUSINESS_ACCOUNT_ID", "")
+META_ACCESS_TOKEN = os.getenv("META_ACCESS_TOKEN", "")           # legacy fallback; prefer OAuth
+INSTAGRAM_BUSINESS_ACCOUNT_ID = os.getenv("INSTAGRAM_BUSINESS_ACCOUNT_ID", "")  # legacy fallback
 META_APP_ID = os.getenv("META_APP_ID", "")
 META_APP_SECRET = os.getenv("META_APP_SECRET", "")
 

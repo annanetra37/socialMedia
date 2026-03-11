@@ -277,6 +277,9 @@ tr:hover td { background: rgba(108,99,255,.04); }
 .product-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
 .product-row .p-name { flex: 1; }
 .product-row .p-price { width: 90px; }
+.prod-img-btn { width: 36px; height: 36px; border-radius: 6px; border: 1px dashed var(--border); background: var(--bg); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 16px; overflow: hidden; flex-shrink: 0; transition: border-color .15s; }
+.prod-img-btn:hover { border-color: var(--primary); }
+.prod-img-btn img { width: 36px; height: 36px; object-fit: cover; border-radius: 5px; }
 .cred-note { background: rgba(245,166,35,.08); border: 1px solid rgba(245,166,35,.25); border-radius: 8px; padding: 10px 14px; font-size: 12px; color: var(--warning); margin-bottom: 16px; line-height: 1.6; }
 .pillar-slider-row { margin-bottom: 14px; }
 .pillar-slider-label { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 5px; }
@@ -2212,6 +2215,8 @@ function renderBrandsList(brands, statuses=[]) {
           <div style="display:flex;gap:6px;flex-wrap:wrap;">
             <button class="btn btn-ghost btn-sm" onclick="selectBrand('${b.slug}','${esc(b.name)}');showSection('dashboard');">View</button>
             <a class="btn btn-primary btn-sm" href="/api/oauth/connect/${b.slug}" title="Authorize via Facebook OAuth">${connectLabel}</a>
+            ${b.source === 'uploaded' ? `<button class="btn btn-ghost btn-sm" onclick="editBrand('${b.slug}')" title="Edit brand">✏️ Edit</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteBrand('${b.slug}','${esc(b.name)}')" title="Delete brand">🗑</button>` : ''}
           </div>
         </td>
       </tr>`;
@@ -2506,6 +2511,91 @@ function onIndustryChange(industry) {
 // ═══════════════════ BRAND FORM (multi-step wizard) ═══════════════════
 const BF_STEPS = ['Basic Info','Credentials','Audience','Products','Goals'];
 let _bfStep = 1;
+let _bfEditSlug = null; // non-null when editing an existing brand
+
+async function editBrand(slug) {
+  let profile;
+  try {
+    const r = await fetch(`/api/brands/${slug}/profile`);
+    if (!r.ok) throw new Error('Could not load brand');
+    profile = await r.json();
+  } catch(e) { toast('Could not load brand: '+e.message,'error'); return; }
+
+  _bfEditSlug = slug;
+  _bfStep = 1;
+
+  // Reset
+  ['bf-name','bf-tagline','bf-industry','bf-website','bf-handle','bf-voice','bf-values',
+   'bf-token','bf-ig-id','bf-page-id','bf-times','bf-hashtags',
+   'bf-age','bf-location','bf-interests','bf-pain',
+   'bf-goal-followers','bf-goal-eng','bf-goal-dms','bf-goal-sales','bf-followers'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = '';
+  });
+
+  // Fill Basic Info
+  const set = (id, v) => { const el=document.getElementById(id); if(el&&v!=null) el.value=v; };
+  set('bf-name', profile.name);
+  set('bf-tagline', profile.tagline);
+  set('bf-industry', profile.industry);
+  set('bf-website', profile.website);
+  set('bf-handle', profile.instagram_handle);
+  if (profile.brand_voice) { set('bf-voice', profile.brand_voice); const h=document.getElementById('bf-voice-hint'); if(h) h.style.display='inline'; }
+  set('bf-values', (profile.brand_values||[]).join(', '));
+  set('bf-followers', profile.social_media?.instagram?.current_followers || '');
+  set('bf-times', (profile.social_media?.instagram?.best_posting_times||[]).join(', '));
+  set('bf-hashtags', (profile.social_media?.instagram?.top_hashtags||[]).join(', '));
+
+  // Audience
+  const ta = profile.target_audience || {};
+  set('bf-age', ta.age_range);
+  const gEl = document.getElementById('bf-gender'); if(gEl&&ta.gender) gEl.value=ta.gender;
+  set('bf-location', (ta.location||[]).join(', '));
+  set('bf-interests', (ta.interests||[]).join(', '));
+  set('bf-pain', (ta.pain_points||[]).join(', '));
+
+  // Products
+  document.getElementById('bf-products-list').innerHTML = '';
+  Object.keys(_productImages).forEach(k => delete _productImages[k]);
+  _productCount = 0;
+  (profile.products || []).forEach((prod, i) => {
+    const idx = addProduct({ name: prod.name, price_usd: prod.price_usd || prod.price_eur || 0 });
+  });
+  if (!profile.products?.length) { addProduct(); addProduct(); }
+
+  // Goals
+  const g = profile.goals || {};
+  set('bf-goal-followers', g.monthly_follower_growth);
+  set('bf-goal-eng', g.engagement_rate_target);
+  set('bf-goal-dms', g.monthly_dms_leads);
+  set('bf-goal-sales', g.monthly_sales_from_social);
+
+  // Content mix
+  const cm = profile.content_mix || {};
+  if (cm.reels != null) document.getElementById('bf-reel').value = Math.round(cm.reels*100);
+  if (cm.carousels != null) document.getElementById('bf-carousel').value = Math.round(cm.carousels*100);
+  if (cm.images != null) document.getElementById('bf-image').value = Math.round(cm.images*100);
+  if (cm.stories != null) document.getElementById('bf-story').value = Math.round(cm.stories*100);
+  ['reel','carousel','image','story'].forEach(t => updatePillarVal(t, document.getElementById(`bf-${t}`).value));
+
+  renderBfSteps();
+  showBfStep(1);
+  const overlay = document.getElementById('brand-form-overlay');
+  overlay.classList.add('open');
+  const titleEl = overlay.querySelector('.modal-title');
+  if (titleEl) titleEl.textContent = `Edit Brand: ${profile.name}`;
+}
+
+async function deleteBrand(slug, name) {
+  if (!confirm(`Delete brand "${name}"?\n\nThis removes all stored data and cannot be undone.`)) return;
+  try {
+    const r = await fetch(`/api/brands/${slug}`, { method: 'DELETE' });
+    if (!r.ok) { const e=await r.json(); throw new Error(e.detail||r.statusText); }
+    toast(`Brand "${name}" deleted`, 'success');
+    await loadBrands();
+    if (S.section === 'brands') loadBrandsList();
+    if (S.section === 'agency') loadAgency();
+  } catch(e) { toast('Delete failed: '+e.message, 'error'); }
+}
 
 function openBrandForm() {
   _bfStep = 1;
@@ -2527,10 +2617,16 @@ function openBrandForm() {
   document.getElementById('bf-story').value = 10;
   ['reel','carousel','image','story'].forEach(t => updatePillarVal(t, document.getElementById(`bf-${t}`).value));
   document.getElementById('bf-products-list').innerHTML = '';
+  Object.keys(_productImages).forEach(k => delete _productImages[k]);
+  _productCount = 0;
+  _bfEditSlug = null;
   addProduct(); addProduct(); // start with 2 empty rows
   renderBfSteps();
   showBfStep(1);
-  document.getElementById('brand-form-overlay').classList.add('open');
+  const overlay = document.getElementById('brand-form-overlay');
+  overlay.classList.add('open');
+  const titleEl = overlay.querySelector('.modal-title');
+  if (titleEl) titleEl.textContent = 'Add New Brand';
 }
 
 function closeBrandForm() {
@@ -2579,21 +2675,54 @@ function goBrandStep(dir) {
 }
 
 let _productCount = 0;
-function addProduct() {
+const _productImages = {}; // idx → File
+
+function addProduct(prefill) {
   const idx = ++_productCount;
   const container = document.getElementById('bf-products-list');
   const row = document.createElement('div');
   row.className = 'product-row';
   row.id = `prod-row-${idx}`;
   row.innerHTML = `
+    <button type="button" class="prod-img-btn" id="prod-imgbtn-${idx}" onclick="document.getElementById('prod-imgfile-${idx}').click()" title="Upload product photo">📷</button>
+    <input type="file" id="prod-imgfile-${idx}" accept="image/jpeg,image/png,image/webp" style="display:none" onchange="onProductImageSelected(${idx},this)">
     <input type="text" class="form-input p-name" placeholder="Product name" id="prod-name-${idx}">
     <input type="number" class="form-input p-price" placeholder="Price $" id="prod-price-${idx}" min="0">
     <button class="btn btn-danger btn-sm" onclick="removeProduct(${idx})">✕</button>`;
   container.appendChild(row);
+  if (prefill) {
+    if (prefill.name) document.getElementById(`prod-name-${idx}`).value = prefill.name;
+    if (prefill.price_usd || prefill.price_eur) {
+      document.getElementById(`prod-price-${idx}`).value = prefill.price_usd || prefill.price_eur || '';
+    }
+    if (prefill._imageUrl) {
+      const btn = document.getElementById(`prod-imgbtn-${idx}`);
+      btn.innerHTML = `<img src="${prefill._imageUrl}" alt="product">`;
+    }
+  }
+  return idx;
 }
 function removeProduct(idx) {
   const row = document.getElementById(`prod-row-${idx}`);
   if (row) row.remove();
+  delete _productImages[idx];
+}
+function onProductImageSelected(idx, input) {
+  const file = input.files[0];
+  if (!file) return;
+  _productImages[idx] = file;
+  const btn = document.getElementById(`prod-imgbtn-${idx}`);
+  const url = URL.createObjectURL(file);
+  btn.innerHTML = `<img src="${url}" alt="product">`;
+}
+async function uploadProductImages(brandSlug) {
+  for (const [idx, file] of Object.entries(_productImages)) {
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      await fetch(`/api/brands/${brandSlug}/products/${idx}/image`, { method: 'POST', body: fd });
+    } catch(e) { /* non-fatal */ }
+  }
 }
 
 function updatePillarVal(type, value) {
@@ -2677,14 +2806,22 @@ async function submitBrandForm() {
   nextBtn.textContent = 'Saving...';
 
   try {
-    const r = await fetch('/api/brands', {
-      method: 'POST',
+    const isEdit = !!_bfEditSlug;
+    const url = isEdit ? `/api/brands/${_bfEditSlug}` : '/api/brands';
+    const r = await fetch(url, {
+      method: isEdit ? 'PUT' : 'POST',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify(profile)
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Save failed');
-    toast(`Brand "${name}" saved!`, 'success');
+    const savedSlug = data.slug || _bfEditSlug;
+    // Upload any product images
+    if (Object.keys(_productImages).length) {
+      nextBtn.textContent = 'Uploading photos...';
+      await uploadProductImages(savedSlug);
+    }
+    toast(`Brand "${name}" ${isEdit ? 'updated' : 'saved'}!`, 'success');
     closeBrandForm();
     await loadBrands();
     if (S.section === 'brands') loadBrandsList();

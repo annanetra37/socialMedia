@@ -28,8 +28,10 @@ from typing import Any, Optional
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+import shutil
+
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -318,6 +320,80 @@ async def upload_brand(request: Request):
         raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/brands/{brand_slug}/profile")
+async def get_brand_profile(brand_slug: str):
+    """Return full brand profile for a given slug."""
+    return _load_brand(brand_slug)
+
+
+@app.put("/api/brands/{brand_slug}")
+async def update_brand(brand_slug: str, request: Request):
+    """Overwrite a brand's profile (keeps meta_credentials intact)."""
+    try:
+        new_profile = await request.json()
+        if "name" not in new_profile:
+            raise HTTPException(status_code=400, detail="Brand profile must have a 'name' field")
+        profile_path = STORAGE_DIR / brand_slug / "brand_profile.json"
+        if not profile_path.exists():
+            raise HTTPException(status_code=404, detail=f"Brand '{brand_slug}' not found in storage")
+        # Preserve OAuth credentials
+        existing = json.loads(profile_path.read_text())
+        for key in ("meta_credentials", "instagram_account_id", "facebook_page_id"):
+            if key in existing and key not in new_profile:
+                new_profile[key] = existing[key]
+        store = DataStore(new_profile["name"])
+        store.save_brand_profile(new_profile)
+        _glog(f"Brand updated: '{new_profile['name']}' (slug={brand_slug})")
+        return {"slug": brand_slug, "name": new_profile["name"], "saved": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/api/brands/{brand_slug}")
+async def delete_brand(brand_slug: str):
+    """Delete a user-uploaded brand and all its data."""
+    brand_dir = STORAGE_DIR / brand_slug
+    if not brand_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Brand '{brand_slug}' not found")
+    shutil.rmtree(brand_dir)
+    _glog(f"Brand deleted: '{brand_slug}'")
+    return {"deleted": True, "slug": brand_slug}
+
+
+_ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
+_IMAGE_EXTS = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
+
+
+@app.post("/api/brands/{brand_slug}/products/{product_idx}/image")
+async def upload_product_image(brand_slug: str, product_idx: int, file: UploadFile = File(...)):
+    """Upload a product photo. Stored as storage/db/{slug}/product_images/{idx}.jpg"""
+    if file.content_type not in _ALLOWED_IMAGE_TYPES:
+        raise HTTPException(status_code=400, detail="Only JPEG, PNG and WebP images are allowed")
+    img_dir = STORAGE_DIR / brand_slug / "product_images"
+    img_dir.mkdir(parents=True, exist_ok=True)
+    ext = _IMAGE_EXTS.get(file.content_type, ".jpg")
+    dest = img_dir / f"{product_idx}{ext}"
+    # Remove any old version with a different extension
+    for old in img_dir.glob(f"{product_idx}.*"):
+        old.unlink(missing_ok=True)
+    contents = await file.read()
+    dest.write_bytes(contents)
+    return {"saved": True, "url": f"/api/brands/{brand_slug}/products/{product_idx}/image"}
+
+
+@app.get("/api/brands/{brand_slug}/products/{product_idx}/image")
+async def serve_product_image(brand_slug: str, product_idx: int):
+    """Serve a product photo."""
+    img_dir = STORAGE_DIR / brand_slug / "product_images"
+    for ext in (".jpg", ".png", ".webp"):
+        p = img_dir / f"{product_idx}{ext}"
+        if p.exists():
+            return FileResponse(str(p))
+    raise HTTPException(status_code=404, detail="No image found")
 
 
 @app.post("/api/cycle/run")
