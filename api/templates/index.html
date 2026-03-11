@@ -261,6 +261,46 @@ tr:hover td { background: rgba(108,99,255,.04); }
 .upload-zone:hover, .upload-zone.drag-over { border-color: var(--primary); color: var(--primary); background: rgba(108,99,255,.05); }
 .upload-zone .upload-icon { font-size: 36px; margin-bottom: 12px; }
 
+/* ── Brand Form Modal (multi-step wizard) ── */
+.brand-form-modal { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; width: 600px; max-width: 96vw; max-height: 92vh; display: flex; flex-direction: column; overflow: hidden; }
+.brand-form-steps { display: flex; align-items: center; padding: 20px 28px 8px; }
+.step-item { display: flex; align-items: center; gap: 6px; }
+.step-num { width: 24px; height: 24px; border-radius: 50%; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; background: var(--border); color: var(--muted); flex-shrink: 0; transition: all .2s; }
+.step-num.active { background: var(--primary); color: #fff; }
+.step-num.done { background: var(--accent); color: #001a14; }
+.step-lbl { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.step-lbl.active { color: var(--text); font-weight: 600; }
+.step-conn { flex: 1; height: 2px; background: var(--border); margin: 0 6px; min-width: 12px; }
+.step-conn.done { background: var(--accent); }
+.brand-form-body { flex: 1; overflow-y: auto; padding: 20px 28px; }
+.brand-form-footer { padding: 14px 28px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; background: var(--card-bg); flex-shrink: 0; }
+.product-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.product-row .p-name { flex: 1; }
+.product-row .p-price { width: 90px; }
+.cred-note { background: rgba(245,166,35,.08); border: 1px solid rgba(245,166,35,.25); border-radius: 8px; padding: 10px 14px; font-size: 12px; color: var(--warning); margin-bottom: 16px; line-height: 1.6; }
+.pillar-slider-row { margin-bottom: 14px; }
+.pillar-slider-label { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 5px; }
+.pillar-slider { width: 100%; accent-color: var(--primary); cursor: pointer; }
+
+/* ── Global Activity Log Panel ── */
+.glog-panel { position: fixed; bottom: 0; left: 240px; right: 0; background: #07070e; border-top: 2px solid var(--border); z-index: 150; transform: translateY(100%); transition: transform .3s ease; display: flex; flex-direction: column; }
+.glog-panel.open { transform: translateY(0); }
+.glog-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; border-bottom: 1px solid rgba(255,255,255,.06); background: var(--card-bg); flex-shrink: 0; }
+.glog-title { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.glog-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex-shrink: 0; transition: background .3s; }
+.glog-dot.live { background: var(--accent); box-shadow: 0 0 5px var(--accent); animation: pulseDot 2s infinite; }
+.glog-terminal { font-family: 'Courier New', monospace; font-size: 12px; color: #a0ffa0; padding: 10px 16px; height: 210px; overflow-y: auto; flex: 1; }
+.glog-line { line-height: 1.65; white-space: pre-wrap; }
+.glog-line.error { color: var(--danger); }
+.glog-line.warn { color: var(--warning); }
+.glog-line.info { color: #88aaff; }
+.glog-line.success { color: var(--accent); }
+
+/* Log toggle button in sidebar */
+.log-toggle-btn { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 20px; background: none; border: none; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; font-family: inherit; cursor: pointer; text-align: left; transition: all .15s; }
+.log-toggle-btn:hover { color: var(--text); background: rgba(108,99,255,.07); }
+.log-badge { background: rgba(0,212,170,.2); color: var(--accent); border-radius: 9px; padding: 1px 6px; font-size: 10px; font-weight: 700; min-width: 18px; text-align: center; }
+
 /* ── Detail Panel ── */
 .detail-panel { position: fixed; right: -500px; top: 0; width: 480px; height: 100vh; background: var(--surface); border-left: 1px solid var(--border); z-index: 200; transition: right .25s ease; overflow-y: auto; display: flex; flex-direction: column; }
 .detail-panel.open { right: 0; }
@@ -381,6 +421,9 @@ tr:hover td { background: rgba(108,99,255,.04); }
       <div class="health-dot" id="health-dot"></div>
       <span id="health-text">Checking...</span>
     </div>
+    <button class="log-toggle-btn" onclick="toggleLogPanel()" id="log-toggle-btn" style="margin-top:8px;">
+      <span>📟</span> Activity Log <span class="log-badge" id="log-count">0</span>
+    </button>
   </div>
 </aside>
 
@@ -695,7 +738,10 @@ tr:hover td { background: rgba(108,99,255,.04); }
     <div class="subtitle">Manage brand profiles — upload JSON configuration files</div>
   </div>
   <div class="card" style="margin-bottom:24px;">
-    <div class="card-header"><span class="card-title">Upload Brand Profile</span></div>
+    <div class="card-header">
+      <span class="card-title">Upload Brand Profile</span>
+      <button class="btn btn-primary btn-sm" onclick="openBrandForm()">+ New Brand</button>
+    </div>
     <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()"
          ondragover="event.preventDefault();this.classList.add('drag-over')"
          ondragleave="this.classList.remove('drag-over')"
@@ -821,6 +867,191 @@ tr:hover td { background: rgba(108,99,255,.04); }
       <button class="btn btn-ghost btn-sm" onclick="closeModal()">Cancel</button>
       <button class="btn btn-primary" onclick="saveSchedule()">Save Schedule</button>
     </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ BRAND FORM MODAL ═══════════════════ -->
+<div class="modal-overlay" id="brand-form-overlay">
+  <div class="brand-form-modal">
+    <div class="modal-header" style="padding:20px 28px 0;border:none;">
+      <div class="modal-title">Add New Brand</div>
+      <button class="modal-close" onclick="closeBrandForm()">×</button>
+    </div>
+    <div class="brand-form-steps" id="bf-steps"></div>
+    <div class="brand-form-body">
+      <!-- Step 1: Basic Info -->
+      <div id="bf-step-1">
+        <div class="form-group">
+          <label class="form-label">Brand Name *</label>
+          <input type="text" class="form-input" id="bf-name" placeholder="e.g. Luna Silver">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Tagline</label>
+          <input type="text" class="form-input" id="bf-tagline" placeholder="e.g. Handcrafted Nordic Jewellery">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Industry</label>
+            <input type="text" class="form-input" id="bf-industry" placeholder="e.g. E-commerce / Fashion">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Website</label>
+            <input type="url" class="form-input" id="bf-website" placeholder="https://yourbrand.com">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Instagram Handle</label>
+            <input type="text" class="form-input" id="bf-handle" placeholder="@yourbrand">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Current Followers</label>
+            <input type="number" class="form-input" id="bf-followers" placeholder="5000">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Brand Voice</label>
+          <textarea class="form-input" id="bf-voice" rows="3" placeholder="Describe your brand's tone and style — elegant, playful, educational, etc."></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Brand Values (comma-separated)</label>
+          <input type="text" class="form-input" id="bf-values" placeholder="sustainability, craftsmanship, quality">
+        </div>
+      </div>
+
+      <!-- Step 2: Meta / Instagram Credentials -->
+      <div id="bf-step-2" style="display:none;">
+        <div class="cred-note">These credentials are needed for real Instagram posting. Leave blank to stay in demo mode — you can add them later by re-uploading the brand profile.</div>
+        <div class="form-group">
+          <label class="form-label">Meta Access Token</label>
+          <input type="password" class="form-input" id="bf-token" placeholder="EAAxxxxxxx...">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Instagram Business Account ID</label>
+          <input type="text" class="form-input" id="bf-ig-id" placeholder="17841xxxxxxxx">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Facebook Page ID</label>
+          <input type="text" class="form-input" id="bf-page-id" placeholder="123456789">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Best Posting Times (comma-separated, 24h format)</label>
+          <input type="text" class="form-input" id="bf-times" placeholder="12:00, 18:00">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Top Hashtags (comma-separated)</label>
+          <input type="text" class="form-input" id="bf-hashtags" placeholder="#yourbrand, #yourniche">
+        </div>
+      </div>
+
+      <!-- Step 3: Target Audience -->
+      <div id="bf-step-3" style="display:none;">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Age Range</label>
+            <input type="text" class="form-input" id="bf-age" placeholder="25–45">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Gender Focus</label>
+            <select class="form-select" id="bf-gender">
+              <option value="all genders">All genders</option>
+              <option value="primarily female">Primarily female</option>
+              <option value="primarily male">Primarily male</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Location (comma-separated)</label>
+          <input type="text" class="form-input" id="bf-location" placeholder="USA, UK, Canada">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Interests (comma-separated)</label>
+          <input type="text" class="form-input" id="bf-interests" placeholder="fashion, sustainability, travel">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Pain Points (comma-separated)</label>
+          <input type="text" class="form-input" id="bf-pain" placeholder="finding unique gifts, supporting artisans">
+        </div>
+      </div>
+
+      <!-- Step 4: Products -->
+      <div id="bf-step-4" style="display:none;">
+        <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">Add your key products or services. Price in USD (optional).</p>
+        <div id="bf-products-list"></div>
+        <button class="btn btn-ghost btn-sm" onclick="addProduct()" style="margin-top:4px;">+ Add Product</button>
+      </div>
+
+      <!-- Step 5: Goals & Content Mix -->
+      <div id="bf-step-5" style="display:none;">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Monthly Follower Growth Target</label>
+            <input type="number" class="form-input" id="bf-goal-followers" placeholder="500">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Engagement Rate Target (%)</label>
+            <input type="number" class="form-input" id="bf-goal-eng" placeholder="5.0" step="0.1">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Monthly DM Leads Target</label>
+            <input type="number" class="form-input" id="bf-goal-dms" placeholder="40">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Monthly Sales from Social</label>
+            <input type="number" class="form-input" id="bf-goal-sales" placeholder="20">
+          </div>
+        </div>
+        <div style="margin-top:6px;">
+          <div class="form-label" style="margin-bottom:12px;">Content Mix — drag sliders to set your target ratios</div>
+          <div class="pillar-slider-row">
+            <div class="pillar-slider-label"><span style="color:#ff8888;">Reels</span><span id="bf-reel-val" style="color:#ff8888;font-weight:700;">40%</span></div>
+            <input type="range" class="pillar-slider" id="bf-reel" min="0" max="100" value="40" oninput="updatePillarVal('reel',this.value)">
+          </div>
+          <div class="pillar-slider-row">
+            <div class="pillar-slider-label"><span style="color:var(--primary);">Carousels</span><span id="bf-carousel-val" style="color:var(--primary);font-weight:700;">30%</span></div>
+            <input type="range" class="pillar-slider" id="bf-carousel" min="0" max="100" value="30" oninput="updatePillarVal('carousel',this.value)">
+          </div>
+          <div class="pillar-slider-row">
+            <div class="pillar-slider-label"><span style="color:var(--accent);">Images</span><span id="bf-image-val" style="color:var(--accent);font-weight:700;">20%</span></div>
+            <input type="range" class="pillar-slider" id="bf-image" min="0" max="100" value="20" oninput="updatePillarVal('image',this.value)">
+          </div>
+          <div class="pillar-slider-row">
+            <div class="pillar-slider-label"><span style="color:var(--warning);">Stories</span><span id="bf-story-val" style="color:var(--warning);font-weight:700;">10%</span></div>
+            <input type="range" class="pillar-slider" id="bf-story" min="0" max="100" value="10" oninput="updatePillarVal('story',this.value)">
+          </div>
+          <div style="font-size:11px;color:var(--muted);margin-top:4px;" id="bf-mix-total">Total: 100%</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="brand-form-footer">
+      <button class="btn btn-ghost btn-sm" id="bf-back-btn" onclick="goBrandStep(-1)" style="display:none;">← Back</button>
+      <div style="font-size:12px;color:var(--muted);" id="bf-step-label">Step 1 of 5</div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-ghost btn-sm" onclick="closeBrandForm()">Cancel</button>
+        <button class="btn btn-primary btn-sm" id="bf-next-btn" onclick="goBrandStep(1)">Next →</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ GLOBAL ACTIVITY LOG ═══════════════════ -->
+<div class="glog-panel" id="glog-panel">
+  <div class="glog-header">
+    <div class="glog-title" onclick="toggleLogPanel()">
+      <div class="glog-dot" id="glog-dot"></div>
+      📟 Activity Log
+      <span style="font-size:11px;font-weight:400;color:var(--muted);margin-left:4px;" id="glog-last-event"></span>
+    </div>
+    <div style="display:flex;gap:6px;align-items:center;">
+      <button class="btn btn-ghost btn-sm" onclick="clearGlog()" style="font-size:11px;padding:3px 8px;">Clear</button>
+      <button class="btn btn-ghost btn-sm" onclick="toggleLogPanel()" style="font-size:16px;padding:2px 8px;line-height:1;">×</button>
+    </div>
+  </div>
+  <div class="glog-terminal" id="glog-terminal">
+    <div class="glog-line info">[system] Activity log ready — connecting to backend stream...</div>
   </div>
 </div>
 
@@ -2168,10 +2399,275 @@ function toast(msg, type='info') {
   }, 3500);
 }
 
+// ═══════════════════ BRAND FORM (multi-step wizard) ═══════════════════
+const BF_STEPS = ['Basic Info','Credentials','Audience','Products','Goals'];
+let _bfStep = 1;
+
+function openBrandForm() {
+  _bfStep = 1;
+  // Reset all fields
+  ['bf-name','bf-tagline','bf-industry','bf-website','bf-handle','bf-voice','bf-values',
+   'bf-token','bf-ig-id','bf-page-id','bf-times','bf-hashtags',
+   'bf-age','bf-location','bf-interests','bf-pain',
+   'bf-goal-followers','bf-goal-eng','bf-goal-dms','bf-goal-sales'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  ['bf-followers'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  document.getElementById('bf-gender').value = 'all genders';
+  document.getElementById('bf-reel').value = 40;
+  document.getElementById('bf-carousel').value = 30;
+  document.getElementById('bf-image').value = 20;
+  document.getElementById('bf-story').value = 10;
+  ['reel','carousel','image','story'].forEach(t => updatePillarVal(t, document.getElementById(`bf-${t}`).value));
+  document.getElementById('bf-products-list').innerHTML = '';
+  addProduct(); addProduct(); // start with 2 empty rows
+  renderBfSteps();
+  showBfStep(1);
+  document.getElementById('brand-form-overlay').classList.add('open');
+}
+
+function closeBrandForm() {
+  document.getElementById('brand-form-overlay').classList.remove('open');
+}
+
+function renderBfSteps() {
+  const container = document.getElementById('bf-steps');
+  let html = '';
+  BF_STEPS.forEach((name, i) => {
+    const n = i + 1;
+    const cls = n < _bfStep ? 'done' : n === _bfStep ? 'active' : '';
+    const lblCls = n === _bfStep ? 'active' : '';
+    html += `<div class="step-item">
+      <div class="step-num ${cls}">${n < _bfStep ? '✓' : n}</div>
+      <span class="step-lbl ${lblCls}">${name}</span>
+    </div>`;
+    if (i < BF_STEPS.length - 1) {
+      html += `<div class="step-conn ${n < _bfStep ? 'done' : ''}"></div>`;
+    }
+  });
+  container.innerHTML = html;
+}
+
+function showBfStep(step) {
+  for (let i = 1; i <= 5; i++) {
+    const el = document.getElementById(`bf-step-${i}`);
+    if (el) el.style.display = i === step ? 'block' : 'none';
+  }
+  document.getElementById('bf-step-label').textContent = `Step ${step} of 5`;
+  document.getElementById('bf-back-btn').style.display = step > 1 ? 'inline-flex' : 'none';
+  const nextBtn = document.getElementById('bf-next-btn');
+  nextBtn.textContent = step === 5 ? 'Save Brand' : 'Next →';
+}
+
+function goBrandStep(dir) {
+  if (dir === 1 && _bfStep === 1) {
+    if (!document.getElementById('bf-name').value.trim()) {
+      toast('Brand name is required', 'error'); return;
+    }
+  }
+  if (dir === 1 && _bfStep === 5) { submitBrandForm(); return; }
+  _bfStep = Math.max(1, Math.min(5, _bfStep + dir));
+  renderBfSteps();
+  showBfStep(_bfStep);
+}
+
+let _productCount = 0;
+function addProduct() {
+  const idx = ++_productCount;
+  const container = document.getElementById('bf-products-list');
+  const row = document.createElement('div');
+  row.className = 'product-row';
+  row.id = `prod-row-${idx}`;
+  row.innerHTML = `
+    <input type="text" class="form-input p-name" placeholder="Product name" id="prod-name-${idx}">
+    <input type="number" class="form-input p-price" placeholder="Price $" id="prod-price-${idx}" min="0">
+    <button class="btn btn-danger btn-sm" onclick="removeProduct(${idx})">✕</button>`;
+  container.appendChild(row);
+}
+function removeProduct(idx) {
+  const row = document.getElementById(`prod-row-${idx}`);
+  if (row) row.remove();
+}
+
+function updatePillarVal(type, value) {
+  const el = document.getElementById(`bf-${type}-val`);
+  if (el) el.textContent = value + '%';
+  // Update total display
+  const total = ['reel','carousel','image','story'].reduce((s, t) => {
+    const sl = document.getElementById(`bf-${t}`);
+    return s + (sl ? parseInt(sl.value) : 0);
+  }, 0);
+  const totalEl = document.getElementById('bf-mix-total');
+  if (totalEl) {
+    totalEl.textContent = `Total: ${total}%`;
+    totalEl.style.color = total === 100 ? 'var(--accent)' : 'var(--warning)';
+  }
+}
+
+async function submitBrandForm() {
+  const name = document.getElementById('bf-name').value.trim();
+  if (!name) { toast('Brand name is required','error'); return; }
+
+  // Build products array
+  const products = [];
+  document.querySelectorAll('#bf-products-list .product-row').forEach(row => {
+    const id = row.id.split('-')[2];
+    const n = document.getElementById(`prod-name-${id}`)?.value.trim();
+    const p = parseFloat(document.getElementById(`prod-price-${id}`)?.value || 0);
+    if (n) products.push({ name: n, price_usd: p || 0, bestseller: false });
+  });
+
+  const tags = v => document.getElementById(v)?.value.split(',').map(s=>s.trim()).filter(Boolean);
+
+  const profile = {
+    name,
+    tagline: document.getElementById('bf-tagline').value.trim(),
+    industry: document.getElementById('bf-industry').value.trim(),
+    website: document.getElementById('bf-website').value.trim(),
+    instagram_handle: document.getElementById('bf-handle').value.trim(),
+    brand_voice: document.getElementById('bf-voice').value.trim(),
+    brand_values: tags('bf-values'),
+    target_audience: {
+      age_range: document.getElementById('bf-age').value.trim(),
+      gender: document.getElementById('bf-gender').value,
+      location: tags('bf-location'),
+      interests: tags('bf-interests'),
+      pain_points: tags('bf-pain'),
+    },
+    products,
+    social_media: {
+      instagram: {
+        handle: document.getElementById('bf-handle').value.trim(),
+        current_followers: parseInt(document.getElementById('bf-followers').value || 0),
+        best_posting_times: tags('bf-times'),
+        top_hashtags: tags('bf-hashtags'),
+      }
+    },
+    goals: {
+      monthly_follower_growth: parseInt(document.getElementById('bf-goal-followers').value || 0),
+      engagement_rate_target: parseFloat(document.getElementById('bf-goal-eng').value || 0),
+      monthly_dms_leads: parseInt(document.getElementById('bf-goal-dms').value || 0),
+      monthly_sales_from_social: parseInt(document.getElementById('bf-goal-sales').value || 0),
+    },
+    content_mix: {
+      reels: parseInt(document.getElementById('bf-reel').value) / 100,
+      carousels: parseInt(document.getElementById('bf-carousel').value) / 100,
+      images: parseInt(document.getElementById('bf-image').value) / 100,
+      stories: parseInt(document.getElementById('bf-story').value) / 100,
+    },
+  };
+
+  // Attach credentials if provided
+  const token = document.getElementById('bf-token').value.trim();
+  const igId = document.getElementById('bf-ig-id').value.trim();
+  const pageId = document.getElementById('bf-page-id').value.trim();
+  if (token) profile.meta_access_token = token;
+  if (igId)  profile.instagram_account_id = igId;
+  if (pageId) profile.facebook_page_id = pageId;
+
+  const nextBtn = document.getElementById('bf-next-btn');
+  nextBtn.disabled = true;
+  nextBtn.textContent = 'Saving...';
+
+  try {
+    const r = await fetch('/api/brands', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(profile)
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Save failed');
+    toast(`Brand "${name}" saved!`, 'success');
+    closeBrandForm();
+    await loadBrands();
+    if (S.section === 'brands') loadBrandsList();
+    if (S.section === 'agency') loadAgency();
+  } catch(e) {
+    toast('Error: ' + e.message, 'error');
+  } finally {
+    nextBtn.disabled = false;
+    nextBtn.textContent = 'Save Brand';
+  }
+}
+
+// ═══════════════════ GLOBAL ACTIVITY LOG ═══════════════════
+let _glogOpen = false;
+let _glogSse = null;
+let _glogCount = 0;
+
+function toggleLogPanel() {
+  _glogOpen = !_glogOpen;
+  const panel = document.getElementById('glog-panel');
+  panel.classList.toggle('open', _glogOpen);
+  if (_glogOpen) {
+    // Reset unread count
+    _glogCount = 0;
+    document.getElementById('log-count').textContent = '0';
+  }
+}
+
+function connectGlobalLog() {
+  if (_glogSse) return; // already connected
+  const dot = document.getElementById('glog-dot');
+  _glogSse = new EventSource('/api/logs/stream');
+  _glogSse.onopen = () => {
+    if (dot) dot.classList.add('live');
+    appendGlog('[system] Connected to backend activity stream', 'info');
+  };
+  _glogSse.onmessage = e => {
+    try {
+      const d = JSON.parse(e.data);
+      if (d.log) appendGlog(d.log);
+    } catch {}
+  };
+  _glogSse.onerror = () => {
+    if (dot) dot.classList.remove('live');
+    appendGlog('[system] Stream disconnected — retrying...', 'warn');
+  };
+}
+
+function appendGlog(line, forceClass) {
+  const term = document.getElementById('glog-terminal');
+  if (!term) return;
+  const div = document.createElement('div');
+  let cls = forceClass || '';
+  if (!cls) {
+    if (/error|❌/i.test(line)) cls = 'error';
+    else if (/warn|⚠/i.test(line)) cls = 'warn';
+    else if (/✓|complete|success/i.test(line)) cls = 'success';
+    else if (/\[system\]|info/i.test(line)) cls = 'info';
+  }
+  div.className = `glog-line ${cls}`;
+  div.textContent = line;
+  term.appendChild(div);
+  term.scrollTop = term.scrollHeight;
+  // Update last event label
+  const lastEl = document.getElementById('glog-last-event');
+  if (lastEl) {
+    const shortLine = line.replace(/^\[\d{2}:\d{2}:\d{2}\]\s*/, '').slice(0, 50);
+    lastEl.textContent = shortLine;
+  }
+  // Bump unread count if panel is closed
+  if (!_glogOpen) {
+    _glogCount++;
+    const countEl = document.getElementById('log-count');
+    if (countEl) countEl.textContent = _glogCount > 99 ? '99+' : String(_glogCount);
+  }
+}
+
+function clearGlog() {
+  const term = document.getElementById('glog-terminal');
+  if (term) term.innerHTML = '<div class="glog-line info">[system] Log cleared.</div>';
+  _glogCount = 0;
+  document.getElementById('log-count').textContent = '0';
+}
+
 // ═══════════════════ BOOTSTRAP ═══════════════════
 document.addEventListener('DOMContentLoaded', () => {
   showSection('agency');
   init();
+  connectGlobalLog();
 });
 </script>
 </body>

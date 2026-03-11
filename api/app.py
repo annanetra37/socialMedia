@@ -52,6 +52,13 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 # { job_id: { "status": "running|done|error", "logs": deque, "result": dict } }
 _jobs: dict[str, dict] = {}
 
+# ── Global activity log (all backend events, streamed to UI) ──────────────────
+_global_log: deque = deque(maxlen=2000)
+
+def _glog(msg: str) -> None:
+    """Append a timestamped message to the global activity log."""
+    _global_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+
 # ── Scheduler (singleton) ─────────────────────────────────────────────────────
 _scheduler = DailyScheduler()
 
@@ -106,6 +113,7 @@ def _load_brand(brand_slug: str) -> dict:
 def _append_log(job_id: str, message: str) -> None:
     if job_id in _jobs:
         _jobs[job_id]["logs"].append(f"[{datetime.now().strftime('%H:%M:%S')}] {message}")
+    _glog(message)
 
 
 def _run_cycle_task(job_id: str, brand_slug: str, cycle: str, week: int) -> None:
@@ -303,7 +311,9 @@ async def upload_brand(request: Request):
         store = DataStore(profile["name"])
         store.save_brand_profile(profile)
         from storage.data_store import _slug
-        return {"slug": _slug(profile["name"]), "name": profile["name"], "saved": True}
+        slug = _slug(profile["name"])
+        _glog(f"Brand saved: '{profile['name']}' (slug={slug})")
+        return {"slug": slug, "name": profile["name"], "saved": True}
     except HTTPException:
         raise
     except Exception as e:
@@ -324,6 +334,7 @@ async def run_cycle(req: CycleRequest, background_tasks: BackgroundTasks):
         "brand_slug": req.brand_slug,
         "week": req.week,
     }
+    _glog(f"Cycle queued: brand='{req.brand_slug}' cycle='{req.cycle}' week={req.week} job={job_id}")
     background_tasks.add_task(
         _run_cycle_task, job_id, req.brand_slug, req.cycle, req.week
     )
@@ -365,6 +376,27 @@ async def stream_logs(job_id: str):
             time.sleep(0.5)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@app.get("/api/logs/stream")
+async def stream_global_logs():
+    """Server-Sent Events stream of all backend activity (global log)."""
+    def event_generator():
+        sent = 0
+        # Immediately send backlog (last 100 lines)
+        backlog = list(_global_log)
+        for line in backlog:
+            yield f"data: {json.dumps({'log': line})}\n\n"
+        sent = len(backlog)
+        while True:
+            current = list(_global_log)
+            for line in current[sent:]:
+                yield f"data: {json.dumps({'log': line})}\n\n"
+                sent = len(current)
+            time.sleep(0.5)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.get("/api/results/{brand_slug}")
@@ -560,6 +592,7 @@ async def agency_overview():
 @app.post("/api/brands/{brand_slug}/schedule/enable")
 async def enable_brand_schedule(brand_slug: str, req: BrandScheduleRequest):
     """Enable daily automation for a single brand."""
+    _glog(f"Schedule ENABLED for brand='{brand_slug}' timezone={req.timezone}")
     brand = _load_brand(brand_slug)
     result = _scheduler.enable_brand(
         brand_profile=brand,
@@ -575,6 +608,7 @@ async def enable_brand_schedule(brand_slug: str, req: BrandScheduleRequest):
 @app.post("/api/brands/{brand_slug}/schedule/disable")
 async def disable_brand_schedule(brand_slug: str):
     """Disable daily automation for a single brand."""
+    _glog(f"Schedule DISABLED for brand='{brand_slug}'")
     _scheduler.disable_brand(brand_slug)
     return {"disabled": True, "brand_slug": brand_slug}
 
