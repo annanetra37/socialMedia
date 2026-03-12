@@ -30,13 +30,15 @@ from config.settings import META_APP_ID, META_APP_SECRET, STORAGE_DIR, BRAND_PRO
 
 GRAPH_URL = "https://graph.facebook.com/v21.0"
 
-# Meta renamed all instagram_* scopes to instagram_business_* in 2024.
-# pages_show_list is required to discover which FB Pages the user manages.
+# Minimal scopes available in any Meta app without special configuration or review:
+#   pages_show_list      — list the FB Pages the user manages
+#   pages_read_engagement — read page info + discover linked Instagram Business Account
+#
+# These two are enough for our token-discovery flow. Instagram-specific publish/
+# manage scopes (instagram_business_content_publish etc.) require the
+# "Business Login for Instagram" product to be added to the Meta app AND
+# app review before they can be requested here.
 OAUTH_SCOPES = [
-    "instagram_business_basic",
-    "instagram_business_content_publish",
-    "instagram_business_manage_comments",
-    "instagram_business_manage_insights",
     "pages_show_list",
     "pages_read_engagement",
 ]

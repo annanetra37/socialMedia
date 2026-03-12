@@ -732,24 +732,32 @@ async def oauth_connect(brand_slug: str, request: Request):
 
 
 @app.get("/api/oauth/callback")
-async def oauth_callback(
-    request: Request,
-    code: Optional[str] = None,
-    state: Optional[str] = None,
-    error: Optional[str] = None,
-    error_description: Optional[str] = None,
-):
+async def oauth_callback(request: Request):
     """
     Meta OAuth callback.
     Exchanges code → long-lived token → fetches IG account ID → saves to brand profile.
     Redirects back to the UI with ?oauth=success or ?oauth=error.
     """
+    params = dict(request.query_params)
+    code  = params.get("code")
+    state = params.get("state")
+
+    # Facebook uses several different error param names depending on the error type
+    error = (params.get("error") or params.get("error_code") or "")
+    error_msg = (
+        params.get("error_description")
+        or params.get("error_message")
+        or params.get("error_reason")
+        or error
+    )
+
     if error:
-        msg = error_description or error
-        _glog(f"OAuth denied/error for brand='{state}': {msg}")
-        return RedirectResponse(f"/?oauth=error&msg={msg[:120]}")
+        _glog(f"OAuth error for brand='{state}': {error_msg} (raw params: {params})")
+        safe = error_msg.replace(" ", "+")[:200]
+        return RedirectResponse(f"/?oauth=error&brand={state or ''}&msg={safe}")
 
     if not code or not state:
+        _glog(f"OAuth callback missing code/state. Received params: {params}")
         return RedirectResponse("/?oauth=error&msg=missing_code_or_state")
 
     brand_slug = state
