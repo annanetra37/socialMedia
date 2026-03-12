@@ -139,22 +139,31 @@ Please:
 
         raw = self.call_claude(prompt, max_tokens=16000)
 
-        # Phase 2 — JSON-only call (short, focused, guaranteed not to truncate)
+        # Phase 2 — JSON-only call.
+        # IMPORTANT: pass `raw` as extra_context so Claude has the full Phase 1
+        # plan in its conversation window. Without it Phase 2 starts with an
+        # empty message history and has nothing to convert.
         json_prompt = (
-            f"You have just planned the Week {week} campaign schedule. "
-            "Now output ONLY the complete JSON for every post — no markdown, "
-            "no explanation, no code fences. Start with {{ and end with }}.\n\n"
-            f"Required schema (include ALL posts you planned):\n"
+            f"The campaign schedule above has been fully planned for Week {week}. "
+            "Now output ONLY the raw JSON — no markdown, no code fences, no explanation. "
+            "Do not call any tools. Start your response with {{ and end with }}. "
+            "Include every single post from the plan above.\n\n"
+            "Required schema:\n"
             '{{"week_number": ' + str(week) + ', "theme": "...", "posts": ['
             '{{"id": "post_w' + str(week) + '_1", "day": "Monday", "date": "YYYY-MM-DD", '
             '"time": "HH:MM", "type": "reel|carousel|image|story", '
             '"priority": "high|medium|low", "theme": "...", "content_brief": "...", '
             '"hook": "...", "caption_brief": "...", "cta": "...", '
-            '"hashtag_cluster": ["tag1"], "visual_notes": "...", "status": "planned"}}'
-            ', ...more posts...], '
+            '"hashtag_cluster": ["tag1"], "visual_notes": "...", "status": "planned"}},'
+            ' ...all posts...], '
             '"weekly_summary": {{"total_posts": N, "reels": N, "carousels": N, "images": N, "stories": N}}}}'
         )
-        raw_json = self.call_claude(json_prompt, max_tokens=16000, stream_output=False)
+        raw_json = self.call_claude(
+            json_prompt,
+            extra_context=raw,   # ← Phase 1 full output as context
+            max_tokens=16000,
+            stream_output=False,
+        )
 
         plan = self.extract_json(raw_json)
 
