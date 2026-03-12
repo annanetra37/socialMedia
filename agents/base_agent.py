@@ -354,35 +354,56 @@ class BaseAgent(ABC):
     def extract_json(text: str) -> dict:
         """
         Extract the first valid JSON object or array from a text block.
-        Handles markdown code fences gracefully.
-        """
-        # Strip markdown code fences
-        for fence in ("```json", "```JSON", "```"):
-            text = text.replace(fence, "")
-        text = text.strip().strip("`").strip()
 
-        # Try direct parse first
+        Strategy (in order):
+        1. Extract the content of an explicit ```json … ``` code fence — the most
+           reliable signal when agents output narrative + JSON.
+        2. Strip all fences and try to parse the whole text directly.
+        3. Scan from the END of the text for the last { … } or [ … ] block,
+           because agents typically output explanatory prose first then JSON last.
+        """
+        import re as _re
+
+        # 1. Extract from explicit ```json ... ``` fence
+        for pattern in (
+            r"```json\s*([\s\S]+?)```",
+            r"```JSON\s*([\s\S]+?)```",
+        ):
+            m = _re.search(pattern, text, _re.DOTALL)
+            if m:
+                candidate = m.group(1).strip()
+                try:
+                    return json.loads(candidate)
+                except json.JSONDecodeError:
+                    pass
+
+        # 2. Strip fences and try whole-text parse
+        cleaned = text
+        for fence in ("```json", "```JSON", "```"):
+            cleaned = cleaned.replace(fence, "")
+        cleaned = cleaned.strip().strip("`").strip()
+
         try:
-            return json.loads(text)
+            return json.loads(cleaned)
         except json.JSONDecodeError:
             pass
 
-        # Find the first { ... } or [ ... ] block
+        # 3. Scan from the END for the last complete { … } or [ … ] block
+        #    (agents put JSON at the end after narrative prose)
         for start_char, end_char in [('{', '}'), ('[', ']')]:
-            start = text.find(start_char)
-            if start == -1:
-                continue
-            depth = 0
-            for i, ch in enumerate(text[start:], start):
-                if ch == start_char:
-                    depth += 1
-                elif ch == end_char:
-                    depth -= 1
-                    if depth == 0:
-                        try:
-                            return json.loads(text[start: i + 1])
-                        except json.JSONDecodeError:
-                            break
+            positions = [i for i, ch in enumerate(cleaned) if ch == start_char]
+            for start_pos in reversed(positions):
+                depth = 0
+                for i, ch in enumerate(cleaned[start_pos:], start_pos):
+                    if ch == start_char:
+                        depth += 1
+                    elif ch == end_char:
+                        depth -= 1
+                        if depth == 0:
+                            try:
+                                return json.loads(cleaned[start_pos: i + 1])
+                            except json.JSONDecodeError:
+                                break
         return {}
 
     def sleep(self, seconds: float) -> None:
