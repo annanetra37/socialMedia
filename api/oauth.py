@@ -56,6 +56,10 @@ def get_oauth_url(brand_slug: str, redirect_uri: str) -> str:
         "scope": ",".join(OAUTH_SCOPES),
         "state": brand_slug,
         "response_type": "code",
+        # Force Meta to re-show the permission dialog even if the user approved before.
+        # Without this, the "Reconnect" shortcut flow can return a token that silently
+        # lacks pages_show_list, causing /me/accounts to return an empty list.
+        "auth_type": "rerequest",
     }
     return f"https://www.facebook.com/v21.0/dialog/oauth?{urlencode(params)}"
 
@@ -132,22 +136,37 @@ def fetch_instagram_account(token: str) -> dict:
       1. GET /me/accounts  → list of FB Pages the user manages
       2. GET /{page_id}?fields=instagram_business_account  → linked IG account
     Returns the first IG Business Account found.
+
+    Common failure: /me/accounts returns [] when the logged-in Facebook account
+    does not have the Admin role on any FB Page (Editor/Moderator/Analyst are
+    insufficient). Check Page Settings → Page Roles.
     """
+    import logging
+    log = logging.getLogger("oauth")
+
     r = requests.get(f"{GRAPH_URL}/me/accounts", params={
         "access_token": token,
         "fields": "id,name,access_token",
     }, timeout=20)
     r.raise_for_status()
-    pages = r.json().get("data", [])
+    raw = r.json()
+    pages = raw.get("data", [])
+
+    log.info("META /me/accounts → %d page(s): %s",
+             len(pages), [p.get("name") for p in pages])
 
     if not pages:
+        # Include the raw API response so the error log shows exactly what Meta returned
         raise ValueError(
-            "No Facebook Pages found for this account. "
-            "Make sure you manage a Facebook Page that is linked to your Instagram account."
+            f"No Facebook Pages found for this account (Meta returned: {raw}). "
+            "The Facebook account used to log in must have the Admin role on a "
+            "Facebook Page that is linked to your Instagram Business account. "
+            "Editor / Moderator / Analyst roles are not sufficient."
         )
 
     for page in pages:
         page_id = page["id"]
+        page_name = page.get("name", page_id)
         page_token = page.get("access_token", token)
         r2 = requests.get(f"{GRAPH_URL}/{page_id}", params={
             "fields": "instagram_business_account",
@@ -155,17 +174,20 @@ def fetch_instagram_account(token: str) -> dict:
         }, timeout=20)
         data = r2.json()
         ig = data.get("instagram_business_account")
+        log.info("Page '%s' (%s) → instagram_business_account: %s", page_name, page_id, ig)
         if ig:
             return {
                 "instagram_account_id": ig["id"],
                 "facebook_page_id": page_id,
-                "facebook_page_name": page.get("name", ""),
+                "facebook_page_name": page_name,
             }
 
     raise ValueError(
-        "No Instagram Business Account linked to any of your Facebook Pages. "
-        "To fix: Instagram app → Settings → Account → Switch to Professional Account, "
-        "then link it to a Facebook Page."
+        f"None of your {len(pages)} Facebook Page(s) "
+        f"({', '.join(p.get('name', p['id']) for p in pages)}) "
+        "has an Instagram Business Account linked. "
+        "To fix: open the Instagram app → Settings → Account → "
+        "Switch to Professional Account, then link it to your Facebook Page."
     )
 
 
