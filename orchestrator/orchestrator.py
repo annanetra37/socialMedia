@@ -180,13 +180,30 @@ class Orchestrator:
         return result
 
     def run_content_block(self, week: int = 1) -> dict:
-        """Block C: Content — generate content packages for the week's posts."""
-        self._print_block_header("C", "CONTENT CREATION", "✍️")
-        strategy = self.store.load_strategy() or {}
-        trends = self.store.load_trend_report() or {}
-        campaign = self.store.load_campaign(week=week) or {}
+        """Block C: Content — generate content packages for the week's posts.
 
-        if not campaign:
+        Automatically runs prerequisite agents (strategy → trends → campaign)
+        if they haven't been generated yet for this brand.
+        """
+        self._print_block_header("C", "CONTENT CREATION", "✍️")
+        month = datetime.now().strftime("%B %Y")
+
+        strategy = self.store.load_strategy() or {}
+        if not strategy:
+            self.console.print("  [dim]No strategy found — generating strategy first…[/dim]")
+            strategy = self._run_strategy(month)
+            self.store.save_strategy(strategy)
+
+        trends = self.store.load_trend_report() or {}
+        if not trends:
+            self.console.print("  [dim]No trend report found — generating trends first…[/dim]")
+            trends = self._run_trends(strategy)
+            self.store.save_trend_report(trends)
+
+        campaign = self.store.load_campaign(week=week)
+        # Regenerate if missing OR if the stored campaign has no posts
+        if not campaign or not campaign.get("posts"):
+            self.console.print(f"  [dim]No campaign for week {week} — generating campaign first…[/dim]")
             campaign = self._run_campaign(strategy, trends, week)
             self.store.save_campaign(campaign, week=week)
 

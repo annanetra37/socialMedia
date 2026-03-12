@@ -248,7 +248,10 @@ def _run_cycle_task(job_id: str, brand_slug: str, cycle: str, week: int) -> None
 
         elif cycle == "content":
             _append_log(job_id, f"Running content block (week {week})…")
+            _append_log(job_id, "Checking for strategy, trends, and campaign prerequisites…")
             results = orch.run_content_block(week=week)
+            n_pkgs = len(results.get("content_packages", []))
+            _append_log(job_id, f"✓ Content complete — {n_pkgs} packages generated")
 
         elif cycle == "growth":
             _append_log(job_id, "Running growth block…")
