@@ -96,16 +96,22 @@ class BrandScheduleRequest(BaseModel):
 # ════════════════════════════════════════════════════════════════════════════
 
 def _load_brand(brand_slug: str) -> dict:
-    """Load brand profile from storage/db or config/brand_profiles."""
-    # Check storage first (user-uploaded brands)
-    stored = STORAGE_DIR / brand_slug / "brand_profile.json"
-    if stored.exists():
-        return json.loads(stored.read_text())
+    """Load brand profile from DB → filesystem storage → built-in profiles."""
+    import os
+    if os.getenv("DATABASE_URL"):
+        from storage.database import get_brand as db_get
+        profile = db_get(brand_slug)
+        if profile:
+            return profile
+    else:
+        stored = STORAGE_DIR / brand_slug / "brand_profile.json"
+        if stored.exists():
+            return json.loads(stored.read_text())
 
     # Fall back to built-in profiles
+    from storage.data_store import _slug
     for path in BRAND_PROFILES_DIR.glob("*.json"):
         profile = json.loads(path.read_text())
-        from storage.data_store import _slug
         if _slug(profile.get("name", "")) == brand_slug or path.stem == brand_slug:
             return profile
 
@@ -267,12 +273,14 @@ async def health():
 
 @app.get("/api/brands")
 async def list_brands():
+    import os
+    from storage.data_store import _slug
     brands = []
-    # Built-in profiles
+
+    # Built-in profiles (always from filesystem)
     for path in BRAND_PROFILES_DIR.glob("*.json"):
         try:
             p = json.loads(path.read_text())
-            from storage.data_store import _slug
             brands.append({
                 "slug": _slug(p.get("name", path.stem)),
                 "name": p.get("name"),
@@ -282,24 +290,37 @@ async def list_brands():
             })
         except Exception:
             pass
-    # User-uploaded brands
-    for brand_dir in STORAGE_DIR.iterdir():
-        profile_path = brand_dir / "brand_profile.json"
-        if profile_path.exists():
-            try:
-                p = json.loads(profile_path.read_text())
-                from storage.data_store import _slug
-                slug = _slug(p.get("name", brand_dir.name))
-                if not any(b["slug"] == slug for b in brands):
-                    brands.append({
-                        "slug": slug,
-                        "name": p.get("name"),
-                        "industry": p.get("industry"),
-                        "instagram_handle": p.get("instagram_handle"),
-                        "source": "uploaded",
-                    })
-            except Exception:
-                pass
+
+    # User-uploaded brands — DB or filesystem
+    if os.getenv("DATABASE_URL"):
+        from storage.database import list_brands as db_list
+        for row in db_list():
+            if not any(b["slug"] == row["slug"] for b in brands):
+                brands.append({
+                    "slug": row["slug"],
+                    "name": row["name"],
+                    "industry": row.get("industry"),
+                    "instagram_handle": row.get("instagram_handle"),
+                    "source": "uploaded",
+                })
+    else:
+        for brand_dir in STORAGE_DIR.iterdir():
+            profile_path = brand_dir / "brand_profile.json"
+            if profile_path.exists():
+                try:
+                    p = json.loads(profile_path.read_text())
+                    slug = _slug(p.get("name", brand_dir.name))
+                    if not any(b["slug"] == slug for b in brands):
+                        brands.append({
+                            "slug": slug,
+                            "name": p.get("name"),
+                            "industry": p.get("industry"),
+                            "instagram_handle": p.get("instagram_handle"),
+                            "source": "uploaded",
+                        })
+                except Exception:
+                    pass
+
     return {"brands": brands}
 
 
@@ -331,15 +352,13 @@ async def get_brand_profile(brand_slug: str):
 @app.put("/api/brands/{brand_slug}")
 async def update_brand(brand_slug: str, request: Request):
     """Overwrite a brand's profile (keeps meta_credentials intact)."""
+    import os
     try:
         new_profile = await request.json()
         if "name" not in new_profile:
             raise HTTPException(status_code=400, detail="Brand profile must have a 'name' field")
-        profile_path = STORAGE_DIR / brand_slug / "brand_profile.json"
-        if not profile_path.exists():
-            raise HTTPException(status_code=404, detail=f"Brand '{brand_slug}' not found in storage")
-        # Preserve OAuth credentials
-        existing = json.loads(profile_path.read_text())
+        # Load existing to preserve OAuth credentials
+        existing = _load_brand(brand_slug)
         for key in ("meta_credentials", "instagram_account_id", "facebook_page_id"):
             if key in existing and key not in new_profile:
                 new_profile[key] = existing[key]
@@ -356,12 +375,23 @@ async def update_brand(brand_slug: str, request: Request):
 @app.delete("/api/brands/{brand_slug}")
 async def delete_brand(brand_slug: str):
     """Delete a user-uploaded brand and all its data."""
-    brand_dir = STORAGE_DIR / brand_slug
-    if not brand_dir.exists():
-        raise HTTPException(status_code=404, detail=f"Brand '{brand_slug}' not found")
-    shutil.rmtree(brand_dir)
-    _glog(f"Brand deleted: '{brand_slug}'")
-    return {"deleted": True, "slug": brand_slug}
+    import os
+    deleted = False
+    if os.getenv("DATABASE_URL"):
+        from storage.database import delete_brand as db_del, get_brand
+        if not get_brand(brand_slug):
+            raise HTTPException(status_code=404, detail=f"Brand '{brand_slug}' not found")
+        db_del(brand_slug)
+        deleted = True
+    else:
+        brand_dir = STORAGE_DIR / brand_slug
+        if not brand_dir.exists():
+            raise HTTPException(status_code=404, detail=f"Brand '{brand_slug}' not found")
+        shutil.rmtree(brand_dir)
+        deleted = True
+    if deleted:
+        _glog(f"Brand deleted: '{brand_slug}'")
+    return {"deleted": deleted, "slug": brand_slug}
 
 
 _ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
@@ -370,29 +400,41 @@ _IMAGE_EXTS = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 
 @app.post("/api/brands/{brand_slug}/products/{product_idx}/image")
 async def upload_product_image(brand_slug: str, product_idx: int, file: UploadFile = File(...)):
-    """Upload a product photo. Stored as storage/db/{slug}/product_images/{idx}.jpg"""
+    """Upload a product photo."""
+    import os
     if file.content_type not in _ALLOWED_IMAGE_TYPES:
         raise HTTPException(status_code=400, detail="Only JPEG, PNG and WebP images are allowed")
-    img_dir = STORAGE_DIR / brand_slug / "product_images"
-    img_dir.mkdir(parents=True, exist_ok=True)
-    ext = _IMAGE_EXTS.get(file.content_type, ".jpg")
-    dest = img_dir / f"{product_idx}{ext}"
-    # Remove any old version with a different extension
-    for old in img_dir.glob(f"{product_idx}.*"):
-        old.unlink(missing_ok=True)
     contents = await file.read()
-    dest.write_bytes(contents)
+    if os.getenv("DATABASE_URL"):
+        from storage.database import upsert_product_image
+        upsert_product_image(brand_slug, product_idx, contents, file.content_type or "image/jpeg")
+    else:
+        img_dir = STORAGE_DIR / brand_slug / "product_images"
+        img_dir.mkdir(parents=True, exist_ok=True)
+        ext = _IMAGE_EXTS.get(file.content_type, ".jpg")
+        for old in img_dir.glob(f"{product_idx}.*"):
+            old.unlink(missing_ok=True)
+        (img_dir / f"{product_idx}{ext}").write_bytes(contents)
     return {"saved": True, "url": f"/api/brands/{brand_slug}/products/{product_idx}/image"}
 
 
 @app.get("/api/brands/{brand_slug}/products/{product_idx}/image")
 async def serve_product_image(brand_slug: str, product_idx: int):
     """Serve a product photo."""
-    img_dir = STORAGE_DIR / brand_slug / "product_images"
-    for ext in (".jpg", ".png", ".webp"):
-        p = img_dir / f"{product_idx}{ext}"
-        if p.exists():
-            return FileResponse(str(p))
+    import os
+    from fastapi.responses import Response
+    if os.getenv("DATABASE_URL"):
+        from storage.database import get_product_image
+        result = get_product_image(brand_slug, product_idx)
+        if result:
+            data, ct = result
+            return Response(content=data, media_type=ct)
+    else:
+        img_dir = STORAGE_DIR / brand_slug / "product_images"
+        for ext in (".jpg", ".png", ".webp"):
+            p = img_dir / f"{product_idx}{ext}"
+            if p.exists():
+                return FileResponse(str(p))
     raise HTTPException(status_code=404, detail="No image found")
 
 
@@ -477,20 +519,14 @@ async def stream_global_logs():
 
 @app.get("/api/results/{brand_slug}")
 async def get_results(brand_slug: str):
-    store = DataStore.__new__(DataStore)
-    store.brand_slug = brand_slug
-    store.root = STORAGE_DIR / brand_slug
-    if not store.root.exists():
-        raise HTTPException(status_code=404, detail=f"No data for brand '{brand_slug}'")
-    store._init_dirs = lambda: None
-
+    store = DataStore.from_slug(brand_slug)
     return {
         "brand_slug": brand_slug,
-        "strategy": store.load("strategy", _latest_file(store.root / "strategy")),
-        "trends": store.load("trends", _latest_file(store.root / "trends")),
-        "campaign": store.load("campaigns", _latest_file(store.root / "campaigns")),
-        "analytics": store.load("analytics", _latest_file(store.root / "analytics")),
-        "optimizations": store.load("optimizations", _latest_file(store.root / "optimizations")),
+        "strategy":      store.load_latest("strategy"),
+        "trends":        store.load_latest("trends"),
+        "campaign":      store.load_latest("campaigns"),
+        "analytics":     store.load_latest("analytics"),
+        "optimizations": store.load_latest("optimizations"),
     }
 
 
@@ -499,46 +535,30 @@ async def get_result_section(brand_slug: str, section: str):
     valid = {"strategy", "trends", "campaign", "analytics", "optimizations", "engagement", "schedules"}
     if section not in valid:
         raise HTTPException(status_code=400, detail=f"Invalid section. Choose from: {valid}")
-
-    folder_map = {
-        "campaign": "campaigns",
-        "optimizations": "optimizations",
-    }
+    folder_map = {"campaign": "campaigns"}
     folder = folder_map.get(section, section)
-    root = STORAGE_DIR / brand_slug / folder
-    if not root.exists():
+    store = DataStore.from_slug(brand_slug)
+    data = store.load_latest(folder)
+    if data is None:
         return {"data": None}
-
-    filename = _latest_file(root)
-    if not filename:
-        return {"data": None}
-
-    path = root / filename
-    data = json.loads(path.read_text())
-    return {"section": section, "file": filename, "data": data}
+    files = store.list_files(folder)
+    return {"section": section, "file": files[-1] if files else None, "data": data}
 
 
 @app.get("/api/results/{brand_slug}/content_packages")
 async def get_content_packages(brand_slug: str):
     """Return every content/visual/reel package for a brand (one per post)."""
-    root = STORAGE_DIR / brand_slug
-    if not root.exists():
-        return {"brand_slug": brand_slug, "packages": []}
-    content_dir = root / "content"
-    visual_dir  = root / "visuals"
-    reel_dir    = root / "reels"
+    store = DataStore.from_slug(brand_slug)
     packages = []
-    if content_dir.exists():
-        for f in sorted(content_dir.glob("*.json")):
-            post_id = f.stem
-            pkg = {"post_id": post_id, "content": json.loads(f.read_text())}
-            vf = visual_dir / f"{post_id}.json"
-            if vf.exists():
-                pkg["visual"] = json.loads(vf.read_text())
-            rf = reel_dir / f"{post_id}.json"
-            if rf.exists():
-                pkg["reel"] = json.loads(rf.read_text())
-            packages.append(pkg)
+    for fname in store.list_files("content"):
+        post_id = fname.removesuffix(".json")
+        pkg = {
+            "post_id": post_id,
+            "content": store.load("content", fname),
+            "visual":  store.load("visuals", fname),
+            "reel":    store.load("reels", fname),
+        }
+        packages.append(pkg)
     return {"brand_slug": brand_slug, "packages": packages}
 
 
@@ -590,7 +610,15 @@ async def agency_overview():
         except Exception:
             pass
 
-    if STORAGE_DIR.exists():
+    import os
+    if os.getenv("DATABASE_URL"):
+        from storage.database import list_brands as db_list
+        for row in db_list():
+            slug = row["slug"]
+            if slug not in known:
+                known[slug] = {"name": row["name"], "industry": row.get("industry"),
+                               "handle": row.get("instagram_handle", "—"), "source": "uploaded"}
+    elif STORAGE_DIR.exists():
         for brand_dir in STORAGE_DIR.iterdir():
             bp = brand_dir / "brand_profile.json"
             if bp.exists():
@@ -608,35 +636,17 @@ async def agency_overview():
 
     brands_out = []
     for slug, info in known.items():
-        # Latest KPIs
-        analytics = None
-        optimizations = None
-        analytics_dir = STORAGE_DIR / slug / "analytics"
-        opt_dir       = STORAGE_DIR / slug / "optimizations"
-        if analytics_dir.exists():
-            files = sorted(analytics_dir.glob("*.json"))
-            if files:
-                try:
-                    analytics = json.loads(files[-1].read_text())
-                except Exception:
-                    pass
-        if opt_dir.exists():
-            files = sorted(opt_dir.glob("*.json"))
-            if files:
-                try:
-                    optimizations = json.loads(files[-1].read_text())
-                except Exception:
-                    pass
+        store = DataStore.from_slug(slug)
+        analytics = store.load_latest_analytics()
+        optimizations = store.load_latest_optimization()
 
-        # Last run time
+        # Last run time: look at most recently updated analytics/optimizations/engagement key
         last_run = None
         for cat in ("analytics", "optimizations", "engagement"):
-            cat_dir = STORAGE_DIR / slug / cat
-            if cat_dir.exists():
-                files = sorted(cat_dir.glob("*.json"))
-                if files:
-                    last_run = files[-1].stem.split("_")[0]
-                    break
+            keys = store.list_files(cat)
+            if keys:
+                last_run = keys[-1].removesuffix(".json").split("_")[0]
+                break
 
         sched = scheduled_brands.get(slug, {})
         brands_out.append({
@@ -796,7 +806,18 @@ def _auto_refresh_tokens() -> None:
 
 
 @app.on_event("startup")
-async def _start_token_refresh_job():
+async def _startup():
+    import os
+    # Init PostgreSQL schema (no-op if tables already exist)
+    if os.getenv("DATABASE_URL"):
+        try:
+            from storage.database import init_db
+            init_db()
+            _glog("PostgreSQL schema initialised")
+        except Exception as exc:
+            _glog(f"WARNING: DB init failed — {exc}")
+
+    # Token-refresh background job
     from apscheduler.schedulers.background import BackgroundScheduler as _BGScheduler
     _bg = _BGScheduler()
     _bg.add_job(_auto_refresh_tokens, "interval", hours=12, id="token_refresh",

@@ -978,10 +978,6 @@ tr:hover td { background: rgba(108,99,255,.04); }
           <label class="form-label">Best Posting Times (comma-separated, 24h format)</label>
           <input type="text" class="form-input" id="bf-times" placeholder="12:00, 18:00">
         </div>
-        <div class="form-group">
-          <label class="form-label">Top Hashtags (comma-separated)</label>
-          <input type="text" class="form-input" id="bf-hashtags" placeholder="#yourbrand, #yourniche">
-        </div>
       </div>
 
       <!-- Step 3: Target Audience -->
@@ -2526,7 +2522,7 @@ async function editBrand(slug) {
 
   // Reset
   ['bf-name','bf-tagline','bf-industry','bf-website','bf-handle','bf-voice','bf-values',
-   'bf-token','bf-ig-id','bf-page-id','bf-times','bf-hashtags',
+   'bf-token','bf-ig-id','bf-page-id','bf-times',
    'bf-age','bf-location','bf-interests','bf-pain',
    'bf-goal-followers','bf-goal-eng','bf-goal-dms','bf-goal-sales','bf-followers'].forEach(id => {
     const el = document.getElementById(id); if (el) el.value = '';
@@ -2543,7 +2539,6 @@ async function editBrand(slug) {
   set('bf-values', (profile.brand_values||[]).join(', '));
   set('bf-followers', profile.social_media?.instagram?.current_followers || '');
   set('bf-times', (profile.social_media?.instagram?.best_posting_times||[]).join(', '));
-  set('bf-hashtags', (profile.social_media?.instagram?.top_hashtags||[]).join(', '));
 
   // Audience
   const ta = profile.target_audience || {};
@@ -2601,7 +2596,7 @@ function openBrandForm() {
   _bfStep = 1;
   // Reset all fields
   ['bf-name','bf-tagline','bf-industry','bf-website','bf-handle','bf-voice','bf-values',
-   'bf-token','bf-ig-id','bf-page-id','bf-times','bf-hashtags',
+   'bf-token','bf-ig-id','bf-page-id','bf-times',
    'bf-age','bf-location','bf-interests','bf-pain',
    'bf-goal-followers','bf-goal-eng','bf-goal-dms','bf-goal-sales'].forEach(id => {
     const el = document.getElementById(id);
@@ -2776,7 +2771,6 @@ async function submitBrandForm() {
         handle: document.getElementById('bf-handle').value.trim(),
         current_followers: parseInt(document.getElementById('bf-followers').value || 0),
         best_posting_times: tags('bf-times'),
-        top_hashtags: tags('bf-hashtags'),
       }
     },
     goals: {

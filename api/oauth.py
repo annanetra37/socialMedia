@@ -172,33 +172,38 @@ def fetch_instagram_account(token: str) -> dict:
 def save_credentials_to_brand(brand_slug: str, token_data: dict, account_data: dict) -> None:
     """
     Merge OAuth credentials into a brand's stored profile.
-    If the brand only exists as a built-in profile (not yet in storage),
+    If the brand only exists as a built-in profile (not yet in storage/DB),
     it is copied to storage first.
     """
+    import os
     from storage.data_store import _slug, DataStore
 
-    profile_path = STORAGE_DIR / brand_slug / "brand_profile.json"
+    # Load existing profile (DB or filesystem)
+    profile = None
+    if os.getenv("DATABASE_URL"):
+        from storage.database import get_brand
+        profile = get_brand(brand_slug)
+    else:
+        profile_path = STORAGE_DIR / brand_slug / "brand_profile.json"
+        if profile_path.exists():
+            profile = json.loads(profile_path.read_text())
 
-    # If not in storage yet, look for it in built-in profiles and copy it
-    if not profile_path.exists():
-        found = None
+    # If not saved yet, look in built-in profiles and copy to storage
+    if not profile:
         for path in BRAND_PROFILES_DIR.glob("*.json"):
             try:
                 p = json.loads(path.read_text())
                 if _slug(p.get("name", "")) == brand_slug or path.stem == brand_slug:
-                    found = p
+                    profile = p
                     break
             except Exception:
                 pass
-        if not found:
+        if not profile:
             raise FileNotFoundError(
-                f"Brand '{brand_slug}' not found in storage or built-in profiles. "
+                f"Brand '{brand_slug}' not found. "
                 "Save the brand first before connecting Instagram."
             )
-        # Save it to storage so we can attach credentials
-        DataStore(found["name"]).save_brand_profile(found)
-
-    profile = json.loads(profile_path.read_text())
+        DataStore(profile["name"]).save_brand_profile(profile)
 
     profile["meta_credentials"] = {
         "access_token": token_data["access_token"],
@@ -209,11 +214,10 @@ def save_credentials_to_brand(brand_slug: str, token_data: dict, account_data: d
         "expires_in_days": token_data.get("expires_in_days", 60),
         "connected_at": datetime.utcnow().isoformat(),
     }
-    # Top-level aliases for backward compatibility
     profile["instagram_account_id"] = account_data["instagram_account_id"]
     profile["facebook_page_id"] = account_data["facebook_page_id"]
 
-    profile_path.write_text(json.dumps(profile, ensure_ascii=False, indent=2))
+    DataStore(profile["name"]).save_brand_profile(profile)
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -279,41 +283,54 @@ def get_token_status(brand_profile: dict) -> dict:
 def refresh_all_expiring_tokens(glog_fn=None) -> list[str]:
     """
     Scan all stored brand profiles. Refresh tokens expiring in <=7 days.
-    Returns list of brand slugs that were refreshed.
+    Works with both the DB backend and the filesystem backend.
     """
-    from storage.data_store import _slug
+    import os
+    from storage.data_store import DataStore
 
     refreshed = []
 
-    if not STORAGE_DIR.exists():
-        return refreshed
+    # Collect all brand profiles
+    profiles: list[tuple[str, dict]] = []  # [(slug, profile), ...]
 
-    for brand_dir in STORAGE_DIR.iterdir():
-        profile_path = brand_dir / "brand_profile.json"
-        if not profile_path.exists():
-            continue
-        try:
-            profile = json.loads(profile_path.read_text())
-            status = get_token_status(profile)
-            if status["status"] in ("expiring_soon", "expired"):
-                creds = profile.get("meta_credentials", {})
-                old_token = creds.get("access_token")
-                if not old_token:
-                    continue
+    if os.getenv("DATABASE_URL"):
+        from storage.database import list_brands as db_list, get_brand
+        for row in db_list():
+            p = get_brand(row["slug"])
+            if p:
+                profiles.append((row["slug"], p))
+    elif STORAGE_DIR.exists():
+        for brand_dir in STORAGE_DIR.iterdir():
+            profile_path = brand_dir / "brand_profile.json"
+            if profile_path.exists():
                 try:
-                    new_token_data = refresh_long_lived_token(old_token)
-                    creds["access_token"] = new_token_data["access_token"]
-                    creds["expires_at"] = new_token_data["expires_at"]
-                    creds["expires_in_days"] = new_token_data.get("expires_in_days", 60)
-                    profile["meta_credentials"] = creds
-                    profile_path.write_text(json.dumps(profile, ensure_ascii=False, indent=2))
-                    refreshed.append(brand_dir.name)
-                    if glog_fn:
-                        glog_fn(f"Token refreshed for brand '{brand_dir.name}' — "
-                                f"expires in {new_token_data.get('expires_in_days', 60)}d")
-                except Exception as e:
-                    if glog_fn:
-                        glog_fn(f"Token refresh FAILED for brand '{brand_dir.name}': {e}")
+                    profiles.append((brand_dir.name, json.loads(profile_path.read_text())))
+                except Exception:
+                    pass
+
+    for slug, profile in profiles:
+        try:
+            status = get_token_status(profile)
+            if status["status"] not in ("expiring_soon", "expired"):
+                continue
+            creds = profile.get("meta_credentials", {})
+            old_token = creds.get("access_token")
+            if not old_token:
+                continue
+            try:
+                new_token_data = refresh_long_lived_token(old_token)
+                creds["access_token"] = new_token_data["access_token"]
+                creds["expires_at"] = new_token_data["expires_at"]
+                creds["expires_in_days"] = new_token_data.get("expires_in_days", 60)
+                profile["meta_credentials"] = creds
+                DataStore(profile.get("name", slug)).save_brand_profile(profile)
+                refreshed.append(slug)
+                if glog_fn:
+                    glog_fn(f"Token refreshed for '{slug}' — "
+                            f"expires in {new_token_data.get('expires_in_days', 60)}d")
+            except Exception as e:
+                if glog_fn:
+                    glog_fn(f"Token refresh FAILED for '{slug}': {e}")
         except Exception:
             continue
 

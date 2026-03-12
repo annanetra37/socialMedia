@@ -32,6 +32,9 @@ STABILITY_API_KEY = os.getenv("STABILITY_API_KEY", "")
 # ── Trend Data ────────────────────────────────────────────────────────────────
 RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY", "")
 
+# ── Database ──────────────────────────────────────────────────────────────────
+DATABASE_URL = os.getenv("DATABASE_URL", "")  # set automatically by Railway Postgres plugin
+
 # ── App behaviour ─────────────────────────────────────────────────────────────
 RUN_MODE = os.getenv("RUN_MODE", "demo")     # "demo" | "live"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
