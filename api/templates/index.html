@@ -2008,7 +2008,7 @@ async function startRunCycle() {
     const r = await fetch('/api/cycle/run', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({brand, cycle_type: cycle, week: parseInt(week)})
+      body: JSON.stringify({brand_slug: brand, cycle, week: parseInt(week)})
     });
     const data = await r.json();
     const jobId = data.job_id;
@@ -2018,7 +2018,7 @@ async function startRunCycle() {
     appendLog(`[INFO] Job started: ${jobId}`, 'info');
 
     // SSE stream
-    S.sse = new EventSource(`/api/cycle/stream/${jobId}`);
+    S.sse = new EventSource(`/api/stream/${jobId}`);
     S.sse.onmessage = e => {
       try {
         const d = JSON.parse(e.data);

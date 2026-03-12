@@ -297,7 +297,11 @@ class BaseAgent(ABC):
                 "input": block.input,
             }
         if block.type == "thinking":
-            return {"type": "thinking", "thinking": getattr(block, "thinking", "")}
+            return {
+                "type": "thinking",
+                "thinking": getattr(block, "thinking", ""),
+                "signature": getattr(block, "signature", ""),
+            }
         return {"type": block.type}
 
     # ── Rich output helpers ────────────────────────────────────────────────────
