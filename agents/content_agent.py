@@ -10,9 +10,32 @@ Takes a campaign post brief and generates:
 """
 
 import json
+import re
 
 from .base_agent import AgentTool, BaseAgent
 from config.settings import DEFAULT_MODEL, RUN_MODE
+
+
+def _brand_slug(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+
+
+def _product_image_context(brand: dict) -> str:
+    """Build a product image reference block for the agent prompt."""
+    products = brand.get("products", [])
+    if not products:
+        return ""
+    slug = _brand_slug(brand.get("name", "brand"))
+    lines = [
+        "BRAND PRODUCT PHOTOS (real uploaded images — use these as primary visuals):",
+        "These are NOT just for product posts. Use them for lifestyle shots, before/after,",
+        "educational carousels, unboxing reels, and any post where showing the product adds value.",
+    ]
+    for i, p in enumerate(products):
+        price = f"${p['price_usd']}" if p.get("price_usd") else "price unlisted"
+        lines.append(f"  [{i}] {p.get('name', 'Product')} — {price}")
+        lines.append(f"       photo URL: /api/brands/{slug}/products/{i}/image")
+    return "\n".join(lines)
 
 
 class ContentAgent(BaseAgent):
@@ -111,12 +134,14 @@ You adapt tone precisely to each brand's voice."""
         if RUN_MODE == "demo":
             return self._demo_output(post, brand)
 
+        product_ctx = _product_image_context(brand)
         prompt = f"""Write complete social media content for this post brief.
 
 BRAND: {brand.get('name')}
 BRAND VOICE: {brand.get('brand_voice', '')}
 BRAND VALUES: {', '.join(brand.get('brand_values', []))}
 AUDIENCE: {json.dumps(brand.get('target_audience', {}), indent=2)}
+{product_ctx}
 
 POST BRIEF:
 {json.dumps(post, indent=2)}

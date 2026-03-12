@@ -107,13 +107,19 @@ Output always ends with structured JSON."""
         themes = strategy.get("campaign_themes", [])
         current_theme = themes[week - 1] if week <= len(themes) else {"theme": "General"}
 
+        # Posting frequency: prefer strategy output, fall back to brand's stored preference
+        posting_freq = strategy.get('posting_frequency') or brand.get('posting_frequency', {
+            'reels_per_week': 3, 'carousels_per_week': 2, 'images_per_week': 1, 'stories_per_day': 2
+        })
+        content_mix = strategy.get('content_mix') or brand.get('content_mix', {})
+
         prompt = f"""Create a detailed 7-day posting schedule for Week {week}.
 
 BRAND: {brand.get('name')}
 WEEK THEME: {json.dumps(current_theme, indent=2)}
 STRATEGY (posting frequency & content mix):
-{json.dumps(strategy.get('posting_frequency', {}), indent=2)}
-{json.dumps(strategy.get('content_mix', {}), indent=2)}
+{json.dumps(posting_freq, indent=2)}
+{json.dumps(content_mix, indent=2)}
 
 TREND INSIGHTS:
 {json.dumps(trends.get('viral_formats', [])[:3], indent=2)}

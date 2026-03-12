@@ -12,6 +12,7 @@ Takes a post brief and generates detailed visual direction:
 import json
 
 from .base_agent import AgentTool, BaseAgent
+from agents.content_agent import _product_image_context
 from config.settings import DEFAULT_MODEL, OPENAI_API_KEY, RUN_MODE
 
 
@@ -115,6 +116,7 @@ text placement, and how the visual looks as a thumbnail at 50x50px."""
         if RUN_MODE == "demo":
             return self._demo_output(post, brand, content)
 
+        product_ctx = _product_image_context(brand)
         prompt = f"""Create complete visual direction for this social media post.
 
 BRAND: {brand.get('name')}
@@ -123,6 +125,9 @@ POST TYPE: {post.get('type', 'image')}
 CONTENT BRIEF: {post.get('content_brief', '')}
 VISUAL NOTES FROM PLANNER: {post.get('visual_notes', '')}
 CAPTION HOOK: {content.get('caption', {}).get('hook', '')}
+{product_ctx}
+When product photos are listed above, prioritise using them as the primary visual asset
+rather than AI-generated imagery — they show the real product and build trust.
 
 Please:
 1. Use get_brand_visual_guidelines to get colour and typography rules

@@ -958,6 +958,28 @@ tr:hover td { background: rgba(108,99,255,.04); }
 
       <!-- Step 2: Meta / Instagram Credentials -->
       <div id="bf-step-2" style="display:none;">
+        <div class="form-group">
+          <label class="form-label">Brand Timezone
+            <span style="font-size:10px;color:var(--accent);margin-left:6px;">→ auto-fills best posting times</span>
+          </label>
+          <select class="form-select" id="bf-timezone" onchange="onTimezoneChange(this.value)">
+            <option value="UTC">UTC — Coordinated Universal Time</option>
+            <option value="America/New_York">🇺🇸 US Eastern (New York / Miami)</option>
+            <option value="America/Chicago">🇺🇸 US Central (Chicago / Dallas)</option>
+            <option value="America/Denver">🇺🇸 US Mountain (Denver / Phoenix)</option>
+            <option value="America/Los_Angeles">🇺🇸 US Pacific (Los Angeles / Seattle)</option>
+            <option value="America/Sao_Paulo">🇧🇷 Brazil (São Paulo)</option>
+            <option value="Europe/London">🇬🇧 UK (London)</option>
+            <option value="Europe/Paris">🇪🇺 Central Europe (Paris / Berlin / Amsterdam)</option>
+            <option value="Europe/Athens">🇬🇷 Eastern Europe (Athens / Helsinki)</option>
+            <option value="Europe/Moscow">🇷🇺 Moscow</option>
+            <option value="Asia/Dubai">🇦🇪 Gulf (Dubai / Riyadh)</option>
+            <option value="Asia/Kolkata">🇮🇳 India (Mumbai / Delhi)</option>
+            <option value="Asia/Singapore">🇸🇬 Southeast Asia (Singapore / Bangkok)</option>
+            <option value="Asia/Tokyo">🇯🇵 Japan / Korea (Tokyo / Seoul)</option>
+            <option value="Australia/Sydney">🇦🇺 Australia (Sydney / Melbourne)</option>
+          </select>
+        </div>
         <!-- OAuth connect option -->
         <div style="background:rgba(108,99,255,.08);border:1px solid rgba(108,99,255,.25);border-radius:10px;padding:16px 18px;margin-bottom:18px;">
           <div style="font-size:13px;font-weight:600;margin-bottom:6px;">Recommended: Connect via OAuth</div>
@@ -1067,6 +1089,29 @@ tr:hover td { background: rgba(108,99,255,.04); }
             <input type="range" class="pillar-slider" id="bf-story" min="0" max="100" value="10" oninput="updatePillarVal('story',this.value)">
           </div>
           <div style="font-size:11px;color:var(--muted);margin-top:4px;" id="bf-mix-total">Total: 100%</div>
+        </div>
+        <div style="margin-top:20px;border-top:1px solid var(--border);padding-top:16px;">
+          <div class="form-label" style="margin-bottom:12px;">Weekly Posting Frequency — exact post counts per week</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" style="color:#ff8888;">Reels / week</label>
+              <input type="number" class="form-input" id="bf-freq-reels" value="3" min="0" max="14">
+            </div>
+            <div class="form-group">
+              <label class="form-label" style="color:var(--primary);">Carousels / week</label>
+              <input type="number" class="form-input" id="bf-freq-carousels" value="2" min="0" max="14">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" style="color:var(--accent);">Images / week</label>
+              <input type="number" class="form-input" id="bf-freq-images" value="1" min="0" max="14">
+            </div>
+            <div class="form-group">
+              <label class="form-label" style="color:var(--warning);">Stories / day</label>
+              <input type="number" class="form-input" id="bf-freq-stories" value="2" min="0" max="10">
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -1540,6 +1585,10 @@ function renderContent() {
           ${hasReel ? accordionItem('reel-'+idx, '🎬 Reel Script',
             `<div class="caption-pre">${esc(typeof reelScript==='string'?reelScript:JSON.stringify(reelScript,null,2))}</div>`
           ) : ''}
+        </div>
+        <div style="padding:10px 16px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;">
+          <button class="btn btn-ghost btn-sm" onclick="copyText(${JSON.stringify(captionText)},this)">📋 Copy</button>
+          <button class="btn btn-primary btn-sm" onclick="publishPostNow('${esc(S.brand)}','${esc(postId)}',this)">⚡ Post Now</button>
         </div>
       </div>
     </div>`;
@@ -2594,6 +2643,12 @@ async function editBrand(slug) {
   set('bf-values', (profile.brand_values||[]).join(', '));
   set('bf-followers', profile.social_media?.instagram?.current_followers || '');
   set('bf-times', (profile.social_media?.instagram?.best_posting_times||[]).join(', '));
+  if (profile.timezone) { const el=document.getElementById('bf-timezone'); if(el) el.value=profile.timezone; }
+  const pf = profile.posting_frequency || {};
+  set('bf-freq-reels',     pf.reels_per_week     ?? 3);
+  set('bf-freq-carousels', pf.carousels_per_week ?? 2);
+  set('bf-freq-images',    pf.images_per_week    ?? 1);
+  set('bf-freq-stories',   pf.stories_per_day    ?? 2);
 
   // Audience
   const ta = profile.target_audience || {};
@@ -2666,6 +2721,11 @@ function openBrandForm() {
   document.getElementById('bf-image').value = 20;
   document.getElementById('bf-story').value = 10;
   ['reel','carousel','image','story'].forEach(t => updatePillarVal(t, document.getElementById(`bf-${t}`).value));
+  document.getElementById('bf-freq-reels').value = 3;
+  document.getElementById('bf-freq-carousels').value = 2;
+  document.getElementById('bf-freq-images').value = 1;
+  document.getElementById('bf-freq-stories').value = 2;
+  document.getElementById('bf-timezone').value = 'UTC';
   document.getElementById('bf-products-list').innerHTML = '';
   Object.keys(_productImages).forEach(k => delete _productImages[k]);
   _productCount = 0;
@@ -2677,6 +2737,58 @@ function openBrandForm() {
   overlay.classList.add('open');
   const titleEl = overlay.querySelector('.modal-title');
   if (titleEl) titleEl.textContent = 'Add New Brand';
+}
+
+// ── Timezone → suggested posting times ───────────────────────────────────────
+const _TZ_TIMES = {
+  'UTC':                 '12:00, 18:00',
+  'America/New_York':    '09:00, 12:00, 17:00',
+  'America/Chicago':     '08:00, 12:00, 17:00',
+  'America/Denver':      '08:00, 12:00, 17:00',
+  'America/Los_Angeles': '08:00, 12:00, 17:00',
+  'America/Sao_Paulo':   '09:00, 12:00, 19:00',
+  'Europe/London':       '08:00, 12:00, 18:00',
+  'Europe/Paris':        '09:00, 12:00, 19:00',
+  'Europe/Athens':       '09:00, 13:00, 19:00',
+  'Europe/Moscow':       '09:00, 13:00, 19:00',
+  'Asia/Dubai':          '07:00, 12:00, 20:00',
+  'Asia/Kolkata':        '08:00, 13:00, 20:00',
+  'Asia/Singapore':      '07:00, 12:00, 19:00',
+  'Asia/Tokyo':          '07:00, 12:00, 20:00',
+  'Australia/Sydney':    '07:00, 12:00, 19:00',
+};
+function onTimezoneChange(tz) {
+  const el = document.getElementById('bf-times');
+  const suggested = _TZ_TIMES[tz];
+  if (suggested && el) { el.value = suggested; el.placeholder = suggested; }
+}
+
+// ── Manual post publishing ────────────────────────────────────────────────────
+async function publishPostNow(brand, postId, btn) {
+  if (!confirm(`Publish "${postId}" to Instagram right now?`)) return;
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '⏳ Posting…';
+  try {
+    const r = await fetch(`/api/brands/${brand}/posts/${postId}/publish-now`, {method:'POST'});
+    const d = await r.json();
+    const st = d.result?.status || '';
+    if (st === 'published') {
+      btn.textContent = '✅ Posted!';
+      toast('Post published to Instagram!', 'success');
+    } else if (st.startsWith('demo')) {
+      btn.textContent = '✅ Demo OK';
+      toast('Demo mode — would post to Instagram in live mode', 'info');
+    } else {
+      btn.textContent = '❌ Failed';
+      toast('Publish error: ' + (d.result?.detail || st), 'error');
+    }
+  } catch(e) {
+    btn.textContent = '❌ Error';
+    toast('Publish failed: ' + e.message, 'error');
+  } finally {
+    setTimeout(() => { btn.disabled = false; btn.textContent = orig; }, 4000);
+  }
 }
 
 function closeBrandForm() {
@@ -2840,6 +2952,13 @@ async function submitBrandForm() {
       images: parseInt(document.getElementById('bf-image').value) / 100,
       stories: parseInt(document.getElementById('bf-story').value) / 100,
     },
+    posting_frequency: {
+      reels_per_week:     parseInt(document.getElementById('bf-freq-reels').value    || 3),
+      carousels_per_week: parseInt(document.getElementById('bf-freq-carousels').value || 2),
+      images_per_week:    parseInt(document.getElementById('bf-freq-images').value   || 1),
+      stories_per_day:    parseInt(document.getElementById('bf-freq-stories').value  || 2),
+    },
+    timezone: document.getElementById('bf-timezone').value || 'UTC',
   };
 
   // Attach credentials if provided

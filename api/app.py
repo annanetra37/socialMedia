@@ -605,6 +605,54 @@ async def get_content_packages(brand_slug: str):
     return {"brand_slug": brand_slug, "packages": packages}
 
 
+@app.post("/api/brands/{brand_slug}/posts/{post_id}/publish-now")
+async def publish_post_now(brand_slug: str, post_id: str):
+    """Immediately publish a saved content package to Instagram."""
+    from tools.instagram_api import InstagramAPI
+
+    brand = _load_brand(brand_slug)
+    store = DataStore.from_slug(brand_slug)
+
+    content = store.load("content", f"{post_id}.json")
+    if not content:
+        raise HTTPException(status_code=404, detail=f"No content package for '{post_id}'. Run a content cycle first.")
+
+    # Build caption
+    caption_data = content.get("caption", {})
+    if isinstance(caption_data, dict):
+        caption = caption_data.get("full_caption") or "\n\n".join(
+            filter(None, [caption_data.get("hook"), caption_data.get("body"), caption_data.get("cta")])
+        )
+    else:
+        caption = str(caption_data)
+
+    hashtags = content.get("hashtags", {})
+    ht = hashtags.get("full_set", "") if isinstance(hashtags, dict) else (" ".join(hashtags) if isinstance(hashtags, list) else "")
+    if ht:
+        caption = caption.strip() + "\n\n" + ht
+
+    # Try to get a media URL from the saved visual package
+    visual = store.load("visuals", f"{post_id}.json")
+    media_url = ""
+    if visual:
+        media_url = (
+            visual.get("image_url")
+            or visual.get("media_url")
+            or visual.get("primary_image", {}).get("url", "")
+            or visual.get("primary_image", {}).get("generated_url", "")
+        )
+
+    api = InstagramAPI(brand)
+    result = api.schedule_post({
+        "post_id": post_id,
+        "caption": caption.strip(),
+        "media_url": media_url,
+        "post_type": content.get("post_type", "image"),
+    })
+    _glog(f"Manual publish: brand='{brand_slug}' post='{post_id}' → {result.get('status')}")
+    return {"post_id": post_id, "brand_slug": brand_slug, "result": result}
+
+
 @app.get("/api/schedule")
 async def get_schedule():
     return _scheduler.get_status()
