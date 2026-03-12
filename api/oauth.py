@@ -28,15 +28,17 @@ import requests
 
 from config.settings import META_APP_ID, META_APP_SECRET, STORAGE_DIR, BRAND_PROFILES_DIR
 
-GRAPH_URL = "https://graph.facebook.com/v19.0"
+GRAPH_URL = "https://graph.facebook.com/v21.0"
 
+# Meta renamed all instagram_* scopes to instagram_business_* in 2024.
+# pages_show_list is required to discover which FB Pages the user manages.
 OAUTH_SCOPES = [
-    "instagram_basic",
-    "instagram_content_publish",
-    "instagram_manage_comments",
-    "instagram_manage_insights",
+    "instagram_business_basic",
+    "instagram_business_content_publish",
+    "instagram_business_manage_comments",
+    "instagram_business_manage_insights",
+    "pages_show_list",
     "pages_read_engagement",
-    "pages_manage_posts",
 ]
 
 
@@ -53,7 +55,7 @@ def get_oauth_url(brand_slug: str, redirect_uri: str) -> str:
         "state": brand_slug,
         "response_type": "code",
     }
-    return f"https://www.facebook.com/v19.0/dialog/oauth?{urlencode(params)}"
+    return f"https://www.facebook.com/v21.0/dialog/oauth?{urlencode(params)}"
 
 
 # ════════════════════════════════════════════════════════════════════════════
