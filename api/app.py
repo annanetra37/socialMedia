@@ -815,12 +815,15 @@ def _auto_refresh_tokens() -> None:
 
 @app.on_event("startup")
 async def _startup():
+    import asyncio
     import os
-    # Init PostgreSQL schema (no-op if tables already exist)
+    # Init PostgreSQL schema — run in thread so blocking psycopg2 doesn't
+    # stall the event loop and cause health-check timeouts.
     if os.getenv("DATABASE_URL"):
         try:
             from storage.database import init_db
-            init_db()
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, init_db)
             _glog("PostgreSQL schema initialised")
         except Exception as exc:
             _glog(f"WARNING: DB init failed — {exc}")

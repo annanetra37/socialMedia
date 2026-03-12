@@ -28,7 +28,7 @@ def _url() -> str:
 
 @contextmanager
 def _conn():
-    conn = psycopg2.connect(_url())
+    conn = psycopg2.connect(_url(), connect_timeout=10)
     conn.autocommit = False
     try:
         yield conn
