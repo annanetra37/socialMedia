@@ -36,7 +36,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
-from api.scheduler import DailyScheduler
+from api.scheduler import AgencyScheduler as DailyScheduler
 from config.settings import RUN_MODE, BRAND_PROFILES_DIR, STORAGE_DIR
 from storage.data_store import DataStore
 
