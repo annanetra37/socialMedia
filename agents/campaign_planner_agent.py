@@ -166,10 +166,29 @@ Output JSON:
 }}
 ```"""
 
+        # Phase 1 — planning conversation (tools + narrative markdown schedule)
         raw = self.call_claude(prompt)
-        plan = self.extract_json(raw)
-        if not plan:
-            plan = {"raw_response": raw}
+
+        # Phase 2 — dedicated JSON extraction call
+        # Asking Claude to output ONLY the JSON avoids extract_json heuristics entirely.
+        json_prompt = (
+            "You have just planned the Week " + str(week) + " campaign schedule above. "
+            "Now output ONLY the final JSON — no markdown, no explanation, no code fences, "
+            "no extra text. Start your response with { and end with }. "
+            "The JSON must follow this exact schema:\n"
+            '{"week_number": ' + str(week) + ', "theme": "...", "posts": [...], "weekly_summary": {...}}'
+        )
+        raw_json = self.call_claude(json_prompt, stream_output=False)
+
+        plan = self.extract_json(raw_json)
+
+        # Fallback: try the Phase 1 narrative (may contain a ```json block)
+        if not plan.get("posts"):
+            plan = self.extract_json(raw) or plan
+
+        # Last resort: store raw so the user can see what happened
+        if not plan.get("posts"):
+            plan = {"raw_response": raw, "posts": [], "week_number": week}
 
         self.print_result("Posts scheduled", len(plan.get("posts", [])))
         return plan
