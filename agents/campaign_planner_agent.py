@@ -113,6 +113,8 @@ Output always ends with structured JSON."""
         })
         content_mix = strategy.get('content_mix') or brand.get('content_mix', {})
 
+        # Phase 1 — planning only (narrative + tools, NO JSON output requested)
+        # Keeping JSON out of Phase 1 prevents hitting the token limit mid-JSON.
         prompt = f"""Create a detailed 7-day posting schedule for Week {week}.
 
 BRAND: {brand.get('name')}
@@ -131,54 +133,28 @@ GROWTH STRATEGY (hooks, CTAs, hashtags):
 Please:
 1. Use get_optimal_slots to get the best posting times
 2. Use calculate_weekly_post_count to determine post type distribution
-3. Build the complete 7-day schedule
+3. Plan the complete 7-day schedule as a markdown summary (table or list).
+   Show day, time, post type, brief, hook, CTA, priority.
+   Do NOT output JSON yet — that comes in the next step."""
 
-Output JSON:
-```json
-{{
-  "week_number": {week},
-  "theme": "{current_theme.get('theme', '')}",
-  "posts": [
-    {{
-      "id": "post_w{week}_1",
-      "day": "Monday",
-      "date": "<YYYY-MM-DD>",
-      "time": "<HH:MM>",
-      "type": "reel|carousel|image|story",
-      "priority": "high|medium|low",
-      "theme": "<weekly theme>",
-      "content_brief": "<what to create>",
-      "hook": "<opening hook>",
-      "caption_brief": "<tone and key message>",
-      "cta": "<call to action>",
-      "hashtag_cluster": ["<tag1>", "<tag2>"],
-      "visual_notes": "<visual direction>",
-      "status": "planned"
-    }}
-  ],
-  "weekly_summary": {{
-    "total_posts": <n>,
-    "reels": <n>,
-    "carousels": <n>,
-    "images": <n>,
-    "stories": <n>
-  }}
-}}
-```"""
+        raw = self.call_claude(prompt, max_tokens=16000)
 
-        # Phase 1 — planning conversation (tools + narrative markdown schedule)
-        raw = self.call_claude(prompt)
-
-        # Phase 2 — dedicated JSON extraction call
-        # Asking Claude to output ONLY the JSON avoids extract_json heuristics entirely.
+        # Phase 2 — JSON-only call (short, focused, guaranteed not to truncate)
         json_prompt = (
-            "You have just planned the Week " + str(week) + " campaign schedule above. "
-            "Now output ONLY the final JSON — no markdown, no explanation, no code fences, "
-            "no extra text. Start your response with { and end with }. "
-            "The JSON must follow this exact schema:\n"
-            '{"week_number": ' + str(week) + ', "theme": "...", "posts": [...], "weekly_summary": {...}}'
+            f"You have just planned the Week {week} campaign schedule. "
+            "Now output ONLY the complete JSON for every post — no markdown, "
+            "no explanation, no code fences. Start with {{ and end with }}.\n\n"
+            f"Required schema (include ALL posts you planned):\n"
+            '{{"week_number": ' + str(week) + ', "theme": "...", "posts": ['
+            '{{"id": "post_w' + str(week) + '_1", "day": "Monday", "date": "YYYY-MM-DD", '
+            '"time": "HH:MM", "type": "reel|carousel|image|story", '
+            '"priority": "high|medium|low", "theme": "...", "content_brief": "...", '
+            '"hook": "...", "caption_brief": "...", "cta": "...", '
+            '"hashtag_cluster": ["tag1"], "visual_notes": "...", "status": "planned"}}'
+            ', ...more posts...], '
+            '"weekly_summary": {{"total_posts": N, "reels": N, "carousels": N, "images": N, "stories": N}}}}'
         )
-        raw_json = self.call_claude(json_prompt, stream_output=False)
+        raw_json = self.call_claude(json_prompt, max_tokens=16000, stream_output=False)
 
         plan = self.extract_json(raw_json)
 
