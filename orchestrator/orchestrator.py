@@ -229,6 +229,60 @@ class Orchestrator:
 
         return {"schedule": schedule, "optimizations": optimizations}
 
+    # ── Granular single-phase blocks ──────────────────────────────────────────
+
+    def run_strategy_block(self) -> dict:
+        """Run just the Strategy Agent (monthly strategy)."""
+        self._print_block_header("1", "STRATEGY", "📋")
+        month = datetime.now().strftime("%B %Y")
+        strategy = self._run_strategy(month)
+        self.store.save_strategy(strategy)
+        return {"strategy": strategy}
+
+    def run_trends_block(self) -> dict:
+        """Run just the Trend Research Agent."""
+        self._print_block_header("2", "TREND RESEARCH", "🔍")
+        strategy = self.store.load_strategy() or {}
+        trends = self._run_trends(strategy)
+        self.store.save_trend_report(trends)
+        return {"trends": trends}
+
+    def run_campaign_block(self, week: int = 1) -> dict:
+        """Run just the Campaign Planner Agent (requires strategy; auto-generates if missing)."""
+        self._print_block_header("3", "CAMPAIGN PLANNER", "📅")
+        month = datetime.now().strftime("%B %Y")
+        strategy = self.store.load_strategy() or {}
+        if not strategy:
+            self.console.print("  [dim]No strategy found — generating strategy first…[/dim]")
+            strategy = self._run_strategy(month)
+            self.store.save_strategy(strategy)
+        trends = self.store.load_trend_report() or {}
+        if not trends:
+            self.console.print("  [dim]No trend report — generating trends first…[/dim]")
+            trends = self._run_trends(strategy)
+            self.store.save_trend_report(trends)
+        campaign = self._run_campaign(strategy, trends, week)
+        self.store.save_campaign(campaign, week=week)
+        return {"campaign": campaign, "strategy": strategy, "trends": trends}
+
+    def run_analytics_block(self) -> dict:
+        """Run just the Analytics Agent."""
+        self._print_block_header("7", "ANALYTICS", "📊")
+        campaign = self.store.load_campaign() or {}
+        analytics = self._run_analytics(campaign)
+        self.store.save_analytics(analytics)
+        return {"analytics": analytics}
+
+    def run_optimization_block(self, week: int = 1) -> dict:
+        """Run just the Optimization Agent."""
+        self._print_block_header("8", "OPTIMIZATION", "⚙️")
+        analytics = self.store.load_latest_analytics() or {}
+        strategy = self.store.load_strategy() or {}
+        campaign = self.store.load_campaign(week=week) or {}
+        optimizations = self._run_optimization(analytics, strategy, campaign)
+        self.store.save_optimization(optimizations)
+        return {"optimizations": optimizations}
+
     # ══════════════════════════════════════════════════════════════════════════
     # PRIVATE: individual agent runners
     # ══════════════════════════════════════════════════════════════════════════

@@ -12,7 +12,7 @@ Takes a post brief and generates detailed visual direction:
 import json
 
 from .base_agent import AgentTool, BaseAgent
-from agents.content_agent import _product_image_context
+from agents.content_agent import _brand_slug, _product_image_context
 from config.settings import DEFAULT_MODEL, OPENAI_API_KEY, RUN_MODE
 
 
@@ -116,6 +116,38 @@ text placement, and how the visual looks as a thumbnail at 50x50px."""
         if RUN_MODE == "demo":
             return self._demo_output(post, brand, content)
 
+        # ── Decide primary image source ────────────────────────────────────────
+        # If the brand has uploaded product photos, use them directly.
+        # DALL-E is only used when no real photos are available.
+        products = brand.get("products", [])
+        has_product_photos = bool(products)
+
+        if has_product_photos:
+            slug = _brand_slug(brand.get("name", "brand"))
+            # Build the product list for the prompt (same as content agent context)
+            product_lines = []
+            for i, p in enumerate(products):
+                price = f"${p['price_usd']}" if p.get("price_usd") else "unlisted"
+                product_lines.append(
+                    f"  [{i}] {p.get('name','Product')} ({price}) → /api/brands/{slug}/products/{i}/image"
+                )
+            product_photo_block = (
+                "UPLOADED PRODUCT PHOTOS (use these as primary_image.product_photo_url):\n"
+                + "\n".join(product_lines)
+            )
+            dalle_instruction = (
+                "The brand has real product photos (listed above). "
+                "Do NOT call generate_dalle_image. "
+                "Set primary_image.product_photo_url to the most relevant photo URL above. "
+                "Only call generate_image_prompt to write an AI prompt as a backup description."
+            )
+        else:
+            product_photo_block = ""
+            dalle_instruction = (
+                "No product photos are uploaded. "
+                "Call generate_dalle_image to create the primary visual asset if OPENAI_API_KEY is available."
+            )
+
         product_ctx = _product_image_context(brand)
         prompt = f"""Create complete visual direction for this social media post.
 
@@ -125,14 +157,14 @@ POST TYPE: {post.get('type', 'image')}
 CONTENT BRIEF: {post.get('content_brief', '')}
 VISUAL NOTES FROM PLANNER: {post.get('visual_notes', '')}
 CAPTION HOOK: {content.get('caption', {}).get('hook', '')}
-{product_ctx}
-When product photos are listed above, prioritise using them as the primary visual asset
-rather than AI-generated imagery — they show the real product and build trust.
+{product_photo_block}
+
+IMAGE SOURCE INSTRUCTION: {dalle_instruction}
 
 Please:
 1. Use get_brand_visual_guidelines to get colour and typography rules
-2. Use generate_image_prompt to create prompts for each required visual asset
-3. If OPENAI_API_KEY is available, use generate_dalle_image for the primary asset
+2. Use generate_image_prompt to create a backup AI prompt (always useful for designers)
+3. {"Set primary_image.product_photo_url from the list above — skip generate_dalle_image" if has_product_photos else "Use generate_dalle_image for the primary asset if OPENAI_API_KEY is available"}
 
 Output JSON:
 ```json
@@ -140,11 +172,12 @@ Output JSON:
   "post_id": "{post_id}",
   "post_type": "{post.get('type', 'image')}",
   "primary_image": {{
-    "description": "<what to create>",
+    "description": "<what to create or what the photo shows>",
+    "product_photo_url": "<URL from uploaded product photos above, or null if none>",
     "ai_generation_prompt": "<full Midjourney/DALL-E prompt>",
     "photography_brief": "<direction for real photographer>",
     "dimensions": "<WxH>",
-    "generated_url": "<url if actually generated, else null>"
+    "generated_url": "<url if DALL-E generated, else null>"
   }},
   "carousel_slides_design": [
     {{

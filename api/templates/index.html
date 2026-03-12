@@ -633,12 +633,22 @@ tr:hover td { background: rgba(108,99,255,.04); }
     <div class="form-group" style="margin:0;min-width:160px;">
       <label class="form-label">Cycle Type</label>
       <select class="form-select" id="run-cycle-select">
-        <option value="full">Full Cycle</option>
-        <option value="monitoring">Monitoring</option>
-        <option value="content">Content Only</option>
-        <option value="engagement">Engagement Only</option>
-        <option value="strategy">Strategy Only</option>
-        <option value="analytics">Analytics Only</option>
+        <optgroup label="── Full Pipeline ──">
+          <option value="full">Full Cycle (all 8 phases)</option>
+        </optgroup>
+        <optgroup label="── Individual Phases ──">
+          <option value="strategy">1. Strategy</option>
+          <option value="trends">2. Trend Research</option>
+          <option value="campaign">3. Campaign Planner</option>
+          <option value="content">4. Content Generation</option>
+          <option value="engagement">5. Engagement</option>
+          <option value="growth">6. Scheduling + Optimization</option>
+          <option value="analytics">7. Analytics</option>
+          <option value="optimization">8. Optimization</option>
+        </optgroup>
+        <optgroup label="── Daily Blocks ──">
+          <option value="monitoring">Monitoring Block (Trends + Analytics)</option>
+        </optgroup>
       </select>
     </div>
     <div class="form-group" style="margin:0;min-width:130px;">

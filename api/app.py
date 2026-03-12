@@ -254,8 +254,39 @@ def _run_cycle_task(job_id: str, brand_slug: str, cycle: str, week: int) -> None
             _append_log(job_id, f"✓ Content complete — {n_pkgs} packages generated")
 
         elif cycle == "growth":
-            _append_log(job_id, "Running growth block…")
+            _append_log(job_id, "Running growth block (scheduling + optimization)…")
             results = orch.run_growth_block(week=week)
+
+        elif cycle == "strategy":
+            _append_log(job_id, "Phase 1/1: Strategy Agent — generating monthly strategy…")
+            results = orch.run_strategy_block()
+            n = len(results.get("strategy", {}).get("campaign_themes", []))
+            _append_log(job_id, f"✓ Strategy complete — {n} campaign themes")
+
+        elif cycle == "trends":
+            _append_log(job_id, "Phase 1/1: Trend Research Agent…")
+            results = orch.run_trends_block()
+            n = len(results.get("trends", {}).get("trending_topics", []))
+            _append_log(job_id, f"✓ Trends complete — {n} topics found")
+
+        elif cycle == "campaign":
+            _append_log(job_id, f"Phase 1/1: Campaign Planner — Week {week}…")
+            _append_log(job_id, "Loading strategy + trends (auto-generates if missing)…")
+            results = orch.run_campaign_block(week=week)
+            posts = results.get("campaign", {}).get("posts", [])
+            _append_log(job_id, f"✓ Campaign complete — {len(posts)} posts planned for Week {week}")
+
+        elif cycle == "analytics":
+            _append_log(job_id, "Phase 1/1: Analytics Agent…")
+            results = orch.run_analytics_block()
+            eng = results.get("analytics", {}).get("content_performance", {}).get("avg_engagement_rate", "?")
+            _append_log(job_id, f"✓ Analytics complete — avg engagement rate: {eng}%")
+
+        elif cycle == "optimization":
+            _append_log(job_id, "Phase 1/1: Optimization Agent…")
+            results = orch.run_optimization_block(week=week)
+            wins = len(results.get("optimizations", {}).get("quick_wins", []))
+            _append_log(job_id, f"✓ Optimization complete — {wins} quick wins")
 
         else:
             raise ValueError(f"Unknown cycle: {cycle}")
