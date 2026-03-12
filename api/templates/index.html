@@ -675,6 +675,15 @@ tr:hover td { background: rgba(108,99,255,.04); }
     </div>
     <div class="log-terminal" id="log-terminal"><span style="color:var(--muted)">Ready. Press Run Cycle to begin...</span></div>
   </div>
+
+  <div class="card" id="cost-card" style="display:none;margin-top:20px;">
+    <div class="card-header" style="margin-bottom:12px;">
+      <span class="card-title">Job Cost</span>
+      <span id="cost-total" style="font-size:1.3rem;font-weight:700;color:var(--accent);">$0.000000</span>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 24px;font-size:13px;" id="cost-breakdown"></div>
+    <div style="margin-top:10px;font-size:11px;color:var(--muted);" id="cost-model"></div>
+  </div>
 </section>
 
 <!-- ─── AUTOMATION ─── -->
@@ -1996,6 +2005,7 @@ async function startRunCycle() {
 
   const logEl = document.getElementById('log-terminal');
   logEl.innerHTML = '';
+  document.getElementById('cost-card').style.display = 'none';
 
   resetPhaseTracker();
   document.getElementById('run-status-badge').textContent = 'Running';
@@ -2039,6 +2049,8 @@ async function startRunCycle() {
           S.sse.close(); S.sse = null;
           runBtn.disabled = false;
           runBtn.textContent = '▶ Run Cycle';
+          // Show cost card
+          if (jobId) fetchAndShowCost(jobId);
           // Refresh results
           S.res = {};
           if (S.section !== 'run') loadSection(S.section);
@@ -2069,6 +2081,49 @@ function runCycle(type) {
   if (sel) sel.value = type;
   const brandSel = document.getElementById('run-brand-select');
   if (brandSel && S.brand) brandSel.value = S.brand;
+}
+
+async function fetchAndShowCost(jobId) {
+  try {
+    const r = await fetch(`/api/cycle/status/${jobId}`);
+    if (!r.ok) return;
+    const d = await r.json();
+    const usage = d.usage || {};
+    const cost = d.cost_usd || 0;
+    const model = d.model || 'claude-opus-4-6';
+
+    // Pricing per million tokens (must mirror api/app.py _MODEL_PRICING)
+    const pricing = {
+      'claude-opus-4-6':   {input:15,   output:75,   cache_read:1.5,  cache_write:18.75},
+      'claude-sonnet-4-6': {input:3,    output:15,   cache_read:0.30, cache_write:3.75},
+      'claude-haiku-4-5':  {input:0.80, output:4,    cache_read:0.08, cache_write:1.00},
+    };
+    const p = pricing[model] || pricing['claude-opus-4-6'];
+    const m = 1_000_000;
+
+    const rows = [
+      {label:'Input tokens',      tokens: usage.input_tokens       || 0, rate: p.input},
+      {label:'Output tokens',     tokens: usage.output_tokens      || 0, rate: p.output},
+      {label:'Cache read tokens', tokens: usage.cache_read_tokens  || 0, rate: p.cache_read},
+      {label:'Cache write tokens',tokens: usage.cache_write_tokens || 0, rate: p.cache_write},
+    ];
+
+    const fmt = n => n.toLocaleString();
+    const fmtUsd = n => '$' + n.toFixed(6);
+
+    document.getElementById('cost-total').textContent = '$' + cost.toFixed(6);
+    document.getElementById('cost-breakdown').innerHTML = rows.map(row => {
+      const rowCost = row.tokens / m * row.rate;
+      return `
+        <div style="color:var(--muted);">${row.label}</div>
+        <div style="text-align:right;">
+          <span style="color:var(--text);">${fmt(row.tokens)}</span>
+          <span style="color:var(--muted);margin-left:8px;">${fmtUsd(rowCost)}</span>
+        </div>`;
+    }).join('');
+    document.getElementById('cost-model').textContent = `Model: ${model}  ·  Pricing: input $${p.input}/MTok · output $${p.output}/MTok · cache read $${p.cache_read}/MTok`;
+    document.getElementById('cost-card').style.display = '';
+  } catch(e) { /* silently skip if cost unavailable */ }
 }
 
 function appendLog(line, cls) {

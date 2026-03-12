@@ -77,6 +77,12 @@ class BaseAgent(ABC):
         self.console = console or Console()
         self._client = anthropic.Anthropic()
         self._tool_registry: dict[str, AgentTool] = {}
+        self._usage: dict[str, int] = {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+        }
 
         # Register the agent's tools on init
         for tool in self.get_tools():
@@ -250,6 +256,7 @@ class BaseAgent(ABC):
 
             # Reconstruct full content list for appending to messages
             final_msg = stream.get_final_message()
+            self._accumulate_usage(final_msg.usage)
             full_content = [
                 self._content_block_to_dict(b) for b in final_msg.content
             ]
@@ -263,6 +270,7 @@ class BaseAgent(ABC):
     ) -> tuple[str, str, list[dict], list[dict]]:
         """Non-streaming fallback. Returns same shape as _stream_response."""
         response = self._client.messages.create(**create_kwargs)
+        self._accumulate_usage(response.usage)
         text_parts: list[str] = []
         tool_calls: list[dict] = []
         full_content = [
@@ -283,6 +291,15 @@ class BaseAgent(ABC):
             tool_calls,
             full_content,
         )
+
+    def _accumulate_usage(self, usage) -> None:
+        """Add token counts from an Anthropic usage object to this agent's running total."""
+        if usage is None:
+            return
+        self._usage["input_tokens"] += getattr(usage, "input_tokens", 0) or 0
+        self._usage["output_tokens"] += getattr(usage, "output_tokens", 0) or 0
+        self._usage["cache_read_tokens"] += getattr(usage, "cache_read_input_tokens", 0) or 0
+        self._usage["cache_write_tokens"] += getattr(usage, "cache_creation_input_tokens", 0) or 0
 
     @staticmethod
     def _content_block_to_dict(block) -> dict:

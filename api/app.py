@@ -54,6 +54,28 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 # { job_id: { "status": "running|done|error", "logs": deque, "result": dict } }
 _jobs: dict[str, dict] = {}
 
+# ── Anthropic model pricing (USD per million tokens) ─────────────────────────
+_MODEL_PRICING: dict[str, dict[str, float]] = {
+    "claude-opus-4-6":   {"input": 15.00, "output": 75.00, "cache_read": 1.50,  "cache_write": 18.75},
+    "claude-sonnet-4-6": {"input":  3.00, "output": 15.00, "cache_read": 0.30,  "cache_write":  3.75},
+    "claude-haiku-4-5":  {"input":  0.80, "output":  4.00, "cache_read": 0.08,  "cache_write":  1.00},
+}
+_DEFAULT_PRICING = _MODEL_PRICING["claude-opus-4-6"]
+
+def _compute_cost(usage: dict, model: str = "") -> float:
+    p = _MODEL_PRICING.get(model, _DEFAULT_PRICING)
+    m = 1_000_000
+    return (
+        usage.get("input_tokens", 0)       / m * p["input"]
+        + usage.get("output_tokens", 0)    / m * p["output"]
+        + usage.get("cache_read_tokens", 0)  / m * p["cache_read"]
+        + usage.get("cache_write_tokens", 0) / m * p["cache_write"]
+    )
+
+def _merge_agent_usage(total: dict, agent) -> None:
+    for key in total:
+        total[key] += agent._usage.get(key, 0)
+
 # ── Global activity log (all backend events, streamed to UI) ──────────────────
 _global_log: deque = deque(maxlen=2000)
 
@@ -234,6 +256,17 @@ def _run_cycle_task(job_id: str, brand_slug: str, cycle: str, week: int) -> None
 
         else:
             raise ValueError(f"Unknown cycle: {cycle}")
+
+        # Aggregate token usage from all agents
+        all_agents = [
+            orch.strategy_agent, orch.trend_agent, orch.campaign_agent,
+            orch.content_agent, orch.visual_agent, orch.reel_agent,
+            orch.engagement_agent, orch.scheduler_agent,
+            orch.analytics_agent, orch.optimization_agent,
+        ]
+        for agent in all_agents:
+            _merge_agent_usage(_jobs[job_id]["usage"], agent)
+        _jobs[job_id]["model"] = orch.strategy_agent.model
 
         _jobs[job_id]["result"] = results
         _jobs[job_id]["status"] = "done"
@@ -451,6 +484,8 @@ async def run_cycle(req: CycleRequest, background_tasks: BackgroundTasks):
         "cycle": req.cycle,
         "brand_slug": req.brand_slug,
         "week": req.week,
+        "usage": {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0},
+        "model": "",
     }
     _glog(f"Cycle queued: brand='{req.brand_slug}' cycle='{req.cycle}' week={req.week} job={job_id}")
     background_tasks.add_task(
@@ -464,13 +499,18 @@ async def cycle_status(job_id: str):
     if job_id not in _jobs:
         raise HTTPException(status_code=404, detail="Job not found")
     job = _jobs[job_id]
+    usage = job.get("usage", {})
+    model = job.get("model", "")
     return {
         "job_id": job_id,
         "status": job["status"],
         "started_at": job.get("started_at"),
-        "logs": list(job["logs"])[-50:],  # last 50 log lines
+        "logs": list(job["logs"])[-50:],
         "error": job.get("error"),
         "has_result": job["result"] is not None,
+        "usage": usage,
+        "cost_usd": round(_compute_cost(usage, model), 6),
+        "model": model,
     }
 
 
