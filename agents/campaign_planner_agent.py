@@ -38,7 +38,7 @@ For each post you define:
 - Hook (the first 1-3 seconds / opening line)
 - CTA (call to action)
 - Hashtag cluster to use
-- Priority level (high / medium / low)
+- Priority level with intent: "high — boost candidate", "high — organic only", "medium — evergreen", "medium — engagement play", "low — filler", "low — test concept"
 
 You balance:
 ✓ Content mix targets (reels%, carousels%, etc.)
@@ -118,6 +118,19 @@ Always follow the output format requested by the user message exactly."""
         # outputs the schedule DIRECTLY as a JSON object.  No markdown narrative
         # — this avoids wasting tokens on prose that can't be parsed and
         # prevents hitting the output token limit before the JSON appears.
+
+        # Ensure viral_formats is never empty — provide sensible defaults
+        viral_formats = trends.get('viral_formats', [])
+        if not viral_formats:
+            viral_formats = [
+                {"format": "Before → After transformation", "description": "Show a process from start to finish", "best_for": "reels"},
+                {"format": "POV storytelling", "description": "First-person narrative perspective", "best_for": "reels"},
+                {"format": "Educational carousel", "description": "Teach something valuable in swipeable slides", "best_for": "carousels"},
+                {"format": "Behind the scenes", "description": "Raw, authentic look at the process", "best_for": "stories/reels"},
+                {"format": "Product showcase", "description": "Highlight product features and benefits", "best_for": "images/carousels"},
+                {"format": "User question / poll", "description": "Engage audience with interactive questions", "best_for": "stories"},
+            ]
+
         prompt = f"""Create a detailed 7-day posting schedule for Week {week}.
 
 BRAND: {brand.get('name')}
@@ -127,7 +140,7 @@ STRATEGY (posting frequency & content mix):
 {json.dumps(content_mix, indent=2)}
 
 VIRAL FORMATS FROM TREND RESEARCH (assign one to each post via "trend_format"):
-{json.dumps(trends.get('viral_formats', []), indent=2)}
+{json.dumps(viral_formats, indent=2)}
 
 TOP RECOMMENDATIONS:
 {json.dumps(trends.get('top_recommendations', []), indent=2)}
@@ -151,7 +164,7 @@ The JSON must match this exact schema:
 ```
 {{"week_number":{week},"theme":"<week theme>","posts":[
   {{"id":"post_w{week}_1","day":"Monday","date":"YYYY-MM-DD","time":"HH:MM",
-    "type":"reel|carousel|image|story","priority":"high|medium|low",
+    "type":"reel|carousel|image|story","priority":"high — boost candidate|high — organic only|medium — evergreen|medium — engagement play|low — filler|low — test concept",
     "trend_format":"<format name from viral formats above>",
     "theme":"...","content_brief":"...","hook":"...","caption_brief":"...",
     "cta":"...","hashtag_cluster":["tag1","tag2"],"visual_notes":"...","status":"planned"}},
@@ -180,7 +193,7 @@ IMPORTANT: Output ONLY the JSON object. No markdown summary, no tables, no expla
                 '{{"week_number":' + str(week) + ',"theme":"...","posts":['
                 '{{"id":"post_w' + str(week) + '_1","day":"Monday","date":"YYYY-MM-DD",'
                 '"time":"HH:MM","type":"reel|carousel|image|story",'
-                '"priority":"high|medium|low","trend_format":"<viral format name>",'
+                '"priority":"high — boost candidate|high — organic only|medium — evergreen|medium — engagement play|low — filler|low — test concept","trend_format":"<viral format name>",'
                 '"theme":"...","content_brief":"...",'
                 '"hook":"...","caption_brief":"...","cta":"...",'
                 '"hashtag_cluster":["tag1"],"visual_notes":"...","status":"planned"}},'
@@ -194,6 +207,20 @@ IMPORTANT: Output ONLY the JSON object. No markdown summary, no tables, no expla
                 use_tools=False,
             )
             plan = self.extract_json(raw_json)
+
+        # Ensure every post has a trend_format — fill from viral_formats if missing
+        if plan.get("posts"):
+            format_names = [f.get("format", f.get("name", "")) for f in viral_formats]
+            type_format_map = {
+                "reel": "Before → After transformation",
+                "carousel": "Educational carousel",
+                "image": "Product showcase",
+                "story": "Behind the scenes",
+            }
+            for p in plan["posts"]:
+                if not p.get("trend_format"):
+                    post_type = (p.get("type") or "post").lower()
+                    p["trend_format"] = type_format_map.get(post_type, format_names[0] if format_names else "General")
 
         # Ensure weekly_summary is always present and consistent with posts
         if plan.get("posts"):
@@ -261,7 +288,7 @@ IMPORTANT: Output ONLY the JSON object. No markdown summary, no tables, no expla
                 "date": day_date(0),
                 "time": "12:00",
                 "type": "carousel",
-                "priority": "high",
+                "priority": "high — boost candidate",
                 "trend_format": "Historical symbol reveal",
                 "theme": theme_name,
                 "content_brief": "Educational carousel: 7 meanings behind Norse rune symbols",
@@ -279,7 +306,7 @@ IMPORTANT: Output ONLY the JSON object. No markdown summary, no tables, no expla
                 "date": day_date(2),
                 "time": "18:00",
                 "type": "reel",
-                "priority": "high",
+                "priority": "high — organic only",
                 "trend_format": "Before → After transformation",
                 "theme": theme_name,
                 "content_brief": "Process reel: raw silver → finished Norse necklace (ASMR style)",
@@ -297,7 +324,7 @@ IMPORTANT: Output ONLY the JSON object. No markdown summary, no tables, no expla
                 "date": day_date(4),
                 "time": "13:00",
                 "type": "reel",
-                "priority": "high",
+                "priority": "high — boost candidate",
                 "trend_format": "POV storytelling",
                 "theme": theme_name,
                 "content_brief": "Product showcase reel: Norse Rune Necklace worn in natural setting",
@@ -315,7 +342,7 @@ IMPORTANT: Output ONLY the JSON object. No markdown summary, no tables, no expla
                 "date": day_date(6),
                 "time": "17:00",
                 "type": "image",
-                "priority": "medium",
+                "priority": "medium — evergreen",
                 "trend_format": "Historical symbol reveal",
                 "theme": theme_name,
                 "content_brief": "Community/lifestyle image: flat lay of full collection on marble",
@@ -337,7 +364,7 @@ IMPORTANT: Output ONLY the JSON object. No markdown summary, no tables, no expla
                 "date": day_date(1),
                 "time": "09:00",
                 "type": "story",
-                "priority": "medium",
+                "priority": "medium — engagement play",
                 "trend_format": "Historical symbol reveal",
                 "theme": theme_name,
                 "content_brief": "Poll story: 'Which Norse symbol resonates with you?'",
@@ -354,8 +381,8 @@ IMPORTANT: Output ONLY the JSON object. No markdown summary, no tables, no expla
                 "date": day_date(3),
                 "time": "19:00",
                 "type": "story",
-                "priority": "medium",
-                "trend_format": "Before → After transformation",
+                "priority": "low — filler",
+                "trend_format": "Behind the scenes",
                 "theme": theme_name,
                 "content_brief": "Behind-the-scenes story: workshop peek, tools on bench",
                 "hook": "Thursday in the workshop ✨",

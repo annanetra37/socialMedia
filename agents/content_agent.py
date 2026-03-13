@@ -127,14 +127,21 @@ You adapt tone precisely to each brand's voice."""
         post = inputs["post_brief"]
         brand = inputs["brand_profile"]
         strategy = inputs.get("strategy_plan", {})
+        languages = inputs.get("languages") or brand.get("languages") or ["English"]
 
         post_id = post.get("id", "unknown")
-        self.print_header(f"Generating content for {post_id} — {post.get('type', 'post').upper()}")
+        self.print_header(f"Generating content for {post_id} — {post.get('type', 'post').upper()} — languages: {', '.join(languages)}")
 
         if RUN_MODE == "demo":
             return self._demo_output(post, brand)
 
         product_ctx = _product_image_context(brand)
+        lang_instruction = ""
+        if len(languages) == 1:
+            lang_instruction = f"\nLANGUAGE: Write ALL content (caption, hook, CTA, hashtags) in {languages[0]}.\n"
+        elif len(languages) > 1:
+            lang_instruction = f"\nLANGUAGES: Generate the full content package in EACH of these languages: {', '.join(languages)}.\nFor multi-language output, include a top-level \"languages\" object keyed by language name, each containing the full caption/hashtags/carousel/reel content in that language. The first language ({languages[0]}) should also populate the top-level fields.\n"
+
         prompt = f"""Write complete social media content for this post brief.
 
 BRAND: {brand.get('name')}
@@ -142,7 +149,7 @@ BRAND VOICE: {brand.get('brand_voice', '')}
 BRAND VALUES: {', '.join(brand.get('brand_values', []))}
 AUDIENCE: {json.dumps(brand.get('target_audience', {}), indent=2)}
 {product_ctx}
-
+{lang_instruction}
 POST BRIEF:
 {json.dumps(post, indent=2)}
 
