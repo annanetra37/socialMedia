@@ -93,8 +93,9 @@ _scheduler = DailyScheduler()
 
 class CycleRequest(BaseModel):
     brand_slug: Optional[str] = "luna_silver"
-    cycle: str = "full"          # full | monitoring | engagement | content | growth
+    cycle: str = "full"          # full | monitoring | engagement | content | growth | content_single
     week: int = 1                # 1-4
+    post_id: Optional[str] = None  # for content_single — generate content for one post
 
 class ScheduleRequest(BaseModel):
     brand_slug: str = "luna_silver"
@@ -146,7 +147,7 @@ def _append_log(job_id: str, message: str) -> None:
     _glog(message)
 
 
-def _run_cycle_task(job_id: str, brand_slug: str, cycle: str, week: int) -> None:
+def _run_cycle_task(job_id: str, brand_slug: str, cycle: str, week: int, post_id: str | None = None) -> None:
     """Background thread: runs the full orchestrator cycle."""
     from orchestrator.orchestrator import Orchestrator
     from rich.console import Console
@@ -253,6 +254,56 @@ def _run_cycle_task(job_id: str, brand_slug: str, cycle: str, week: int) -> None
             results = orch.run_content_block(week=week)
             n_pkgs = len(results.get("content_packages", []))
             _append_log(job_id, f"✓ Content complete — {n_pkgs} packages generated")
+
+        elif cycle == "content_single":
+            if not post_id:
+                raise ValueError("post_id is required for content_single cycle")
+            _append_log(job_id, f"Generating content for post {post_id}…")
+            campaign = store.load_latest("campaigns") or {}
+            # Find the specific post brief in the campaign
+            post_brief = None
+            for camp in store.load_all("campaigns"):
+                for p in camp.get("posts", []):
+                    if (p.get("id") or p.get("post_id")) == post_id:
+                        post_brief = p
+                        break
+                if post_brief:
+                    break
+            if not post_brief:
+                raise ValueError(f"Post {post_id} not found in any campaign")
+
+            strategy = store.load_latest("strategy") or {}
+            trends = store.load_latest("trends") or {}
+
+            _append_log(job_id, f"Phase 1/3: Content Agent — caption + hashtags…")
+            content = orch.content_agent.run({
+                "post_brief": post_brief, "brand_profile": brand, "strategy_plan": strategy,
+            })
+            store.save_content(content, post_id)
+            _append_log(job_id, "✓ Caption + hashtags generated")
+
+            _append_log(job_id, "Phase 2/3: Visual Agent — image brief…")
+            visual = orch.visual_agent.run({
+                "post_brief": post_brief, "content_package": content, "brand_profile": brand,
+            })
+            store.save_visual(visual, post_id)
+            _append_log(job_id, "✓ Visual brief generated")
+
+            reel = {"skipped": True}
+            if (post_brief.get("type") or "").lower() == "reel":
+                _append_log(job_id, "Phase 3/3: Reel Agent — reel script…")
+                reel = orch.reel_agent.run({
+                    "post_brief": post_brief, "content_package": content,
+                    "brand_profile": brand, "trend_report": trends,
+                })
+                if not reel.get("skipped"):
+                    store.save_reel(reel, post_id)
+                _append_log(job_id, "✓ Reel script generated")
+            else:
+                _append_log(job_id, "Phase 3/3: Reel Agent — skipped (not a reel)")
+
+            results = {"content": content, "visual": visual, "reel": reel, "post_id": post_id}
+            _append_log(job_id, f"✓ Content package complete for {post_id}")
 
         elif cycle == "growth":
             _append_log(job_id, "Running growth block (scheduling + optimization)…")
@@ -524,7 +575,7 @@ async def run_cycle(req: CycleRequest, background_tasks: BackgroundTasks):
     }
     _glog(f"Cycle queued: brand='{req.brand_slug}' cycle='{req.cycle}' week={req.week} job={job_id}")
     background_tasks.add_task(
-        _run_cycle_task, job_id, req.brand_slug, req.cycle, req.week
+        _run_cycle_task, job_id, req.brand_slug, req.cycle, req.week, req.post_id
     )
     return {"job_id": job_id, "status": "queued"}
 

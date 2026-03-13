@@ -1629,6 +1629,7 @@ function renderCampaign() {
         <th style="padding:8px 10px;width:35%;">Brief / Hook</th>
         <th style="padding:8px 10px;">Trend Format</th>
         <th style="padding:8px 10px;">ID</th>
+        <th style="padding:8px 10px;">Action</th>
       </tr>
     </thead>
     <tbody>
@@ -1639,6 +1640,7 @@ function renderCampaign() {
       const prioColor = {high:'var(--danger)',medium:'var(--warning)',low:'var(--muted)'}[prio]||'var(--muted)';
       const brief = esc(p.content_brief || p.hook || p.caption || '—').substring(0,120);
       const trend = esc(p.trend_format || p.format || '—');
+      const pid = p.post_id||p.id||'';
       return `<tr style="border-bottom:1px solid var(--border);background:${i%2===0?'transparent':'rgba(255,255,255,.02)'};">
         <td style="padding:8px 10px;color:var(--muted);">${p.week||1}</td>
         <td style="padding:8px 10px;font-weight:600;">${esc(p.day||'')}</td>
@@ -1647,7 +1649,8 @@ function renderCampaign() {
         <td style="padding:8px 10px;font-weight:600;color:${prioColor};">${prio}</td>
         <td style="padding:8px 10px;line-height:1.5;">${brief}</td>
         <td style="padding:8px 10px;color:var(--muted);">${trend}</td>
-        <td style="padding:8px 10px;font-family:monospace;font-size:10px;color:var(--muted);">${esc(p.post_id||p.id||'')}</td>
+        <td style="padding:8px 10px;font-family:monospace;font-size:10px;color:var(--muted);">${esc(pid)}</td>
+        <td style="padding:8px 10px;"><button class="btn btn-ghost btn-sm" onclick="runInlineCycle('content_single',${p.week||1},'${pid}',this)" style="white-space:nowrap;font-size:11px;">✍️ Generate</button></td>
       </tr>`;
     }).join('')}
     </tbody>
@@ -2116,14 +2119,18 @@ function renderStrategy(data) {
   const themeEl = document.getElementById('strat-themes');
   themeEl.innerHTML = themes.length
     ? `<table>
-        <thead><tr><th>Week</th><th>Theme</th><th>Emotion</th><th>Hook Style</th></tr></thead>
-        <tbody>${themes.map((t, i) => `
+        <thead><tr><th>Week</th><th>Theme</th><th>Emotion</th><th>Hook Style</th><th>Action</th></tr></thead>
+        <tbody>${themes.map((t, i) => {
+          const wk = t.week||i+1;
+          return `
           <tr>
-            <td><span class="badge badge-muted">Week ${t.week||i+1}</span></td>
+            <td><span class="badge badge-muted">Week ${wk}</span></td>
             <td style="font-weight:500;">${esc(t.theme||t.title||'')}</td>
             <td>${esc(t.emotion||t.mood||'')}</td>
             <td style="color:var(--muted);">${esc(t.hook_style||t.style||'')}</td>
-          </tr>`).join('')}</tbody>
+            <td><button class="btn btn-ghost btn-sm" onclick="runInlineCycle('campaign',${wk},null,this)" style="white-space:nowrap;font-size:11px;">▶ Run Campaign</button></td>
+          </tr>`;
+        }).join('')}</tbody>
        </table>`
     : `<div class="empty-state" style="padding:30px;"><div class="empty-icon">📅</div><div class="empty-msg">No campaign themes</div></div>`;
 }
@@ -2350,6 +2357,62 @@ function runCycle(type) {
   if (sel) sel.value = type;
   const brandSel = document.getElementById('run-brand-select');
   if (brandSel && S.brand) brandSel.value = S.brand;
+}
+
+async function runInlineCycle(cycle, week, postId, btn) {
+  if (!S.brand) { toast('Select a brand first', 'error'); return; }
+  const origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '⏳...';
+  btn.style.opacity = '0.6';
+  try {
+    const body = {brand_slug: S.brand, cycle, week: parseInt(week)};
+    if (postId) body.post_id = postId;
+    const r = await fetch('/api/cycle/run', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+    const data = await r.json();
+    const jobId = data.job_id;
+    if (!jobId) throw new Error('No job_id');
+    toast(`Job started (${cycle})`, 'info');
+    const sse = new EventSource(`/api/stream/${jobId}`);
+    sse.onmessage = e => {
+      try {
+        const d = JSON.parse(e.data);
+        if (d.done || d.status === 'complete' || d.status === 'done') {
+          sse.close();
+          btn.disabled = false;
+          btn.textContent = '✓ Done';
+          btn.style.opacity = '1';
+          btn.style.color = 'var(--success, #4caf50)';
+          toast(`${cycle} completed!`, 'success');
+          S.res = {};
+          setTimeout(() => { btn.textContent = origText; btn.style.color = ''; }, 3000);
+        }
+        if (d.error) {
+          sse.close();
+          btn.disabled = false;
+          btn.textContent = origText;
+          btn.style.opacity = '1';
+          toast('Error: ' + d.error, 'error');
+        }
+      } catch(ex) {}
+    };
+    sse.onerror = () => {
+      sse.close();
+      btn.disabled = false;
+      btn.textContent = origText;
+      btn.style.opacity = '1';
+      toast('Stream disconnected', 'error');
+    };
+  } catch(err) {
+    btn.disabled = false;
+    btn.textContent = origText;
+    btn.style.opacity = '1';
+    toast('Failed: ' + err.message, 'error');
+  }
 }
 
 async function fetchAndShowCost(jobId) {
