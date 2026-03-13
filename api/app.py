@@ -623,43 +623,55 @@ async def get_result_section(brand_slug: str, section: str):
 async def get_content_packages(brand_slug: str):
     """Return every content/visual/reel package for a brand (one per post).
 
-    Merges scheduling metadata from the campaign plan (type, day, time,
-    priority, week, trend_format, theme) into each content package so the
-    frontend has everything it needs in a single object.
+    Merges scheduling metadata from ALL campaign plans (not just the latest)
+    into each content package so the frontend has everything it needs.
     """
+    import re as _re
     store = DataStore.from_slug(brand_slug)
 
-    # Build a lookup from post_id → campaign post metadata
-    campaign = store.load_latest("campaigns") or {}
+    # Build a lookup from post_id → campaign post metadata across ALL weeks
     post_meta: dict[str, dict] = {}
-    for p in campaign.get("posts", []):
-        pid = p.get("id") or p.get("post_id")
-        if pid:
-            post_meta[pid] = p
+    for campaign in store.load_all("campaigns"):
+        week_num = campaign.get("week_number", 1)
+        for p in campaign.get("posts", []):
+            pid = p.get("id") or p.get("post_id")
+            if pid:
+                p.setdefault("week", week_num)
+                post_meta[pid] = p
+
+    def _extract_week(post_id: str) -> int:
+        """Extract week number from post_id like 'post_w2_5' → 2."""
+        m = _re.search(r"_w(\d+)", post_id)
+        return int(m.group(1)) if m else 1
 
     packages = []
     for fname in store.list_files("content"):
         post_id = fname.removesuffix(".json")
         content = store.load("content", fname) or {}
         meta = post_meta.get(post_id, {})
+
+        # Extract caption object — the content agent nests it under "caption"
+        caption_data = content.get("caption", {})
+
         pkg = {
-            # Scheduling metadata from campaign plan
+            # Scheduling metadata: prefer campaign plan, fall back to content data
             "post_id":      post_id,
-            "type":         meta.get("type", content.get("post_type", "image")),
+            "type":         meta.get("type") or content.get("post_type", "image"),
             "day":          meta.get("day", ""),
             "date":         meta.get("date", ""),
-            "time":         meta.get("time", ""),
+            "time":         meta.get("time") or content.get("best_time_to_post", ""),
             "priority":     meta.get("priority", "medium"),
-            "week":         meta.get("week", int(meta.get("id", "post_w1_0").split("_w")[-1].split("_")[0]) if meta.get("id") else 1),
+            "week":         meta.get("week") or _extract_week(post_id),
             "trend_format": meta.get("trend_format", ""),
             "theme":        meta.get("theme", ""),
-            "hook":         meta.get("hook", ""),
+            "hook":         meta.get("hook") or (caption_data.get("hook", "") if isinstance(caption_data, dict) else ""),
             # Content data from content/visual/reel agents
-            "caption":  content.get("caption", {}),
-            "hashtags": content.get("hashtags", content.get("hashtag_cluster", [])),
-            "alt_text": content.get("alt_text", ""),
-            "visual":   store.load("visuals", fname),
-            "reel":     store.load("reels", fname),
+            "caption":      caption_data,
+            "hashtags":     content.get("hashtags", content.get("hashtag_cluster", [])),
+            "alt_text":     content.get("alt_text", ""),
+            "content_notes": content.get("content_notes", ""),
+            "visual":       store.load("visuals", fname),
+            "reel":         store.load("reels", fname),
         }
         packages.append(pkg)
     return {"brand_slug": brand_slug, "packages": packages}
