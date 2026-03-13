@@ -604,21 +604,9 @@ async def get_results(brand_slug: str):
     }
 
 
-@app.get("/api/results/{brand_slug}/{section}")
-async def get_result_section(brand_slug: str, section: str):
-    valid = {"strategy", "trends", "campaign", "analytics", "optimizations", "engagement", "schedules"}
-    if section not in valid:
-        raise HTTPException(status_code=400, detail=f"Invalid section. Choose from: {valid}")
-    folder_map = {"campaign": "campaigns"}
-    folder = folder_map.get(section, section)
-    store = DataStore.from_slug(brand_slug)
-    data = store.load_latest(folder)
-    if data is None:
-        return {"data": None}
-    files = store.list_files(folder)
-    return {"section": section, "file": files[-1] if files else None, "data": data}
-
-
+# IMPORTANT: This route MUST be defined BEFORE the /{section} catch-all below,
+# otherwise FastAPI matches "content_packages" as a {section} parameter and
+# returns 400 because it's not in the valid set.
 @app.get("/api/results/{brand_slug}/content_packages")
 async def get_content_packages(brand_slug: str):
     """Return every content/visual/reel package for a brand (one per post).
@@ -675,6 +663,21 @@ async def get_content_packages(brand_slug: str):
         }
         packages.append(pkg)
     return {"brand_slug": brand_slug, "packages": packages}
+
+
+@app.get("/api/results/{brand_slug}/{section}")
+async def get_result_section(brand_slug: str, section: str):
+    valid = {"strategy", "trends", "campaign", "analytics", "optimizations", "engagement", "schedules"}
+    if section not in valid:
+        raise HTTPException(status_code=400, detail=f"Invalid section. Choose from: {valid}")
+    folder_map = {"campaign": "campaigns"}
+    folder = folder_map.get(section, section)
+    store = DataStore.from_slug(brand_slug)
+    data = store.load_latest(folder)
+    if data is None:
+        return {"data": None}
+    files = store.list_files(folder)
+    return {"section": section, "file": files[-1] if files else None, "data": data}
 
 
 @app.post("/api/brands/{brand_slug}/posts/{post_id}/publish-now")
