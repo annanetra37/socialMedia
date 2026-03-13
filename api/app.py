@@ -621,16 +621,45 @@ async def get_result_section(brand_slug: str, section: str):
 
 @app.get("/api/results/{brand_slug}/content_packages")
 async def get_content_packages(brand_slug: str):
-    """Return every content/visual/reel package for a brand (one per post)."""
+    """Return every content/visual/reel package for a brand (one per post).
+
+    Merges scheduling metadata from the campaign plan (type, day, time,
+    priority, week, trend_format, theme) into each content package so the
+    frontend has everything it needs in a single object.
+    """
     store = DataStore.from_slug(brand_slug)
+
+    # Build a lookup from post_id → campaign post metadata
+    campaign = store.load_latest("campaigns") or {}
+    post_meta: dict[str, dict] = {}
+    for p in campaign.get("posts", []):
+        pid = p.get("id") or p.get("post_id")
+        if pid:
+            post_meta[pid] = p
+
     packages = []
     for fname in store.list_files("content"):
         post_id = fname.removesuffix(".json")
+        content = store.load("content", fname) or {}
+        meta = post_meta.get(post_id, {})
         pkg = {
-            "post_id": post_id,
-            "content": store.load("content", fname),
-            "visual":  store.load("visuals", fname),
-            "reel":    store.load("reels", fname),
+            # Scheduling metadata from campaign plan
+            "post_id":      post_id,
+            "type":         meta.get("type", content.get("post_type", "image")),
+            "day":          meta.get("day", ""),
+            "date":         meta.get("date", ""),
+            "time":         meta.get("time", ""),
+            "priority":     meta.get("priority", "medium"),
+            "week":         meta.get("week", int(meta.get("id", "post_w1_0").split("_w")[-1].split("_")[0]) if meta.get("id") else 1),
+            "trend_format": meta.get("trend_format", ""),
+            "theme":        meta.get("theme", ""),
+            "hook":         meta.get("hook", ""),
+            # Content data from content/visual/reel agents
+            "caption":  content.get("caption", {}),
+            "hashtags": content.get("hashtags", content.get("hashtag_cluster", [])),
+            "alt_text": content.get("alt_text", ""),
+            "visual":   store.load("visuals", fname),
+            "reel":     store.load("reels", fname),
         }
         packages.append(pkg)
     return {"brand_slug": brand_slug, "packages": packages}
