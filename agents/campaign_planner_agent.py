@@ -126,8 +126,10 @@ STRATEGY (posting frequency & content mix):
 {json.dumps(posting_freq, indent=2)}
 {json.dumps(content_mix, indent=2)}
 
-TREND INSIGHTS:
-{json.dumps(trends.get('viral_formats', [])[:3], indent=2)}
+VIRAL FORMATS FROM TREND RESEARCH (assign one to each post via "trend_format"):
+{json.dumps(trends.get('viral_formats', []), indent=2)}
+
+TOP RECOMMENDATIONS:
 {json.dumps(trends.get('top_recommendations', []), indent=2)}
 
 GROWTH STRATEGY (hooks, CTAs, hashtags):
@@ -140,11 +142,17 @@ Steps:
    no commentary before or after, JUST the JSON. Keep content_brief and hook
    values concise (1-2 sentences each).
 
+IMPORTANT: Every post MUST include a "trend_format" field set to the name of the
+viral format it uses (from the list above). Match formats to post types
+(e.g. "Before → After transformation" for process reels, "POV storytelling" for
+narrative reels, etc.). Use the exact format name strings from the trend research.
+
 The JSON must match this exact schema:
 ```
 {{"week_number":{week},"theme":"<week theme>","posts":[
   {{"id":"post_w{week}_1","day":"Monday","date":"YYYY-MM-DD","time":"HH:MM",
     "type":"reel|carousel|image|story","priority":"high|medium|low",
+    "trend_format":"<format name from viral formats above>",
     "theme":"...","content_brief":"...","hook":"...","caption_brief":"...",
     "cta":"...","hashtag_cluster":["tag1","tag2"],"visual_notes":"...","status":"planned"}},
   ...
@@ -172,7 +180,8 @@ IMPORTANT: Output ONLY the JSON object. No markdown summary, no tables, no expla
                 '{{"week_number":' + str(week) + ',"theme":"...","posts":['
                 '{{"id":"post_w' + str(week) + '_1","day":"Monday","date":"YYYY-MM-DD",'
                 '"time":"HH:MM","type":"reel|carousel|image|story",'
-                '"priority":"high|medium|low","theme":"...","content_brief":"...",'
+                '"priority":"high|medium|low","trend_format":"<viral format name>",'
+                '"theme":"...","content_brief":"...",'
                 '"hook":"...","caption_brief":"...","cta":"...",'
                 '"hashtag_cluster":["tag1"],"visual_notes":"...","status":"planned"}},'
                 '...],"weekly_summary":{{"total_posts":N,"reels":N,"carousels":N,"images":N,"stories":N}}}}'
@@ -253,6 +262,7 @@ IMPORTANT: Output ONLY the JSON object. No markdown summary, no tables, no expla
                 "time": "12:00",
                 "type": "carousel",
                 "priority": "high",
+                "trend_format": "Historical symbol reveal",
                 "theme": theme_name,
                 "content_brief": "Educational carousel: 7 meanings behind Norse rune symbols",
                 "hook": "\"These symbols were carved by Vikings 1200 years ago…\"",
@@ -270,6 +280,7 @@ IMPORTANT: Output ONLY the JSON object. No markdown summary, no tables, no expla
                 "time": "18:00",
                 "type": "reel",
                 "priority": "high",
+                "trend_format": "Before → After transformation",
                 "theme": theme_name,
                 "content_brief": "Process reel: raw silver → finished Norse necklace (ASMR style)",
                 "hook": "\"Raw silver to finished necklace in 60 seconds…\"",
@@ -287,6 +298,7 @@ IMPORTANT: Output ONLY the JSON object. No markdown summary, no tables, no expla
                 "time": "13:00",
                 "type": "reel",
                 "priority": "high",
+                "trend_format": "POV storytelling",
                 "theme": theme_name,
                 "content_brief": "Product showcase reel: Norse Rune Necklace worn in natural setting",
                 "hook": "\"POV: You just found the perfect gift for someone who loves Norse culture\"",
@@ -304,6 +316,7 @@ IMPORTANT: Output ONLY the JSON object. No markdown summary, no tables, no expla
                 "time": "17:00",
                 "type": "image",
                 "priority": "medium",
+                "trend_format": "Historical symbol reveal",
                 "theme": theme_name,
                 "content_brief": "Community/lifestyle image: flat lay of full collection on marble",
                 "hook": "\"Which piece speaks to you? 👇\"",
@@ -325,6 +338,7 @@ IMPORTANT: Output ONLY the JSON object. No markdown summary, no tables, no expla
                 "time": "09:00",
                 "type": "story",
                 "priority": "medium",
+                "trend_format": "Historical symbol reveal",
                 "theme": theme_name,
                 "content_brief": "Poll story: 'Which Norse symbol resonates with you?'",
                 "hook": "Quick question for you 👇",
@@ -341,6 +355,7 @@ IMPORTANT: Output ONLY the JSON object. No markdown summary, no tables, no expla
                 "time": "19:00",
                 "type": "story",
                 "priority": "medium",
+                "trend_format": "Before → After transformation",
                 "theme": theme_name,
                 "content_brief": "Behind-the-scenes story: workshop peek, tools on bench",
                 "hook": "Thursday in the workshop ✨",
