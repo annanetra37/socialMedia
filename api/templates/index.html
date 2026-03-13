@@ -1099,6 +1099,27 @@ tr:hover td { background: rgba(108,99,255,.04); }
           <label class="form-label">Pain Points (comma-separated)</label>
           <input type="text" class="form-input" id="bf-pain" placeholder="finding unique gifts, supporting artisans">
         </div>
+        <div class="form-group">
+          <label class="form-label">Content Languages</label>
+          <p style="font-size:11px;color:var(--muted);margin:0 0 6px;">Select languages the brand's content should be generated in.</p>
+          <div id="bf-languages" style="display:flex;flex-wrap:wrap;gap:6px;">
+            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" value="English" checked> English</label>
+            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" value="Spanish"> Spanish</label>
+            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" value="French"> French</label>
+            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" value="German"> German</label>
+            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" value="Italian"> Italian</label>
+            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" value="Portuguese"> Portuguese</label>
+            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" value="Arabic"> Arabic</label>
+            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" value="Turkish"> Turkish</label>
+            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" value="Hindi"> Hindi</label>
+            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" value="Chinese"> Chinese</label>
+            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" value="Japanese"> Japanese</label>
+            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" value="Korean"> Korean</label>
+            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" value="Dutch"> Dutch</label>
+            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" value="Russian"> Russian</label>
+          </div>
+          <input type="text" class="form-input" id="bf-lang-custom" placeholder="Other languages (comma-separated)" style="margin-top:6px;font-size:12px;">
+        </div>
       </div>
 
       <!-- Step 4: Products -->
@@ -1636,8 +1657,10 @@ function renderCampaign() {
     ${posts.map((p, i) => {
       const type = (p.type||'post').toLowerCase();
       const color = TYPE_COLORS[type] || '#7a7890';
-      const prio = (p.priority||'medium').toLowerCase();
-      const prioColor = {high:'var(--danger)',medium:'var(--warning)',low:'var(--muted)'}[prio]||'var(--muted)';
+      const prioRaw = (p.priority||'medium').toLowerCase();
+      const prioLevel = prioRaw.startsWith('high') ? 'high' : prioRaw.startsWith('medium') ? 'medium' : 'low';
+      const prioColor = {high:'var(--danger)',medium:'var(--warning)',low:'var(--muted)'}[prioLevel]||'var(--muted)';
+      const prio = esc(p.priority||'medium');
       const brief = esc(p.content_brief || p.hook || p.caption || '—').substring(0,120);
       const trend = esc(p.trend_format || p.format || '—');
       const pid = p.post_id||p.id||'';
@@ -1650,7 +1673,17 @@ function renderCampaign() {
         <td style="padding:8px 10px;line-height:1.5;">${brief}</td>
         <td style="padding:8px 10px;color:var(--muted);">${trend}</td>
         <td style="padding:8px 10px;font-family:monospace;font-size:10px;color:var(--muted);">${esc(pid)}</td>
-        <td style="padding:8px 10px;"><button class="btn btn-ghost btn-sm" onclick="runInlineCycle('content_single',${p.week||1},'${pid}',this)" style="white-space:nowrap;font-size:11px;">✍️ Generate</button></td>
+        <td style="padding:8px 10px;">
+          <div style="display:flex;align-items:center;gap:4px;">
+            <div class="lang-dropdown" style="position:relative;display:inline-block;">
+              <button class="btn btn-ghost btn-sm" onclick="toggleLangDropdown(this)" style="font-size:10px;padding:2px 6px;" title="Select languages">🌐</button>
+              <div class="lang-menu" style="display:none;position:absolute;right:0;top:100%;z-index:100;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:6px;min-width:140px;box-shadow:0 4px 12px rgba(0,0,0,.3);">
+                ${(getBrandLanguages()).map(l => '<label style="display:flex;align-items:center;gap:4px;font-size:11px;padding:2px 0;cursor:pointer;white-space:nowrap;"><input type="checkbox" value="'+l+'" checked> '+l+'</label>').join('')}
+              </div>
+            </div>
+            <button class="btn btn-ghost btn-sm generate-btn" onclick="runInlineCycleWithLangs('content_single',${p.week||1},'${pid}',this)" style="white-space:nowrap;font-size:11px;">✍️ Generate</button>
+          </div>
+        </td>
       </tr>`;
     }).join('')}
     </tbody>
@@ -2359,7 +2392,7 @@ function runCycle(type) {
   if (brandSel && S.brand) brandSel.value = S.brand;
 }
 
-async function runInlineCycle(cycle, week, postId, btn) {
+async function runInlineCycle(cycle, week, postId, btn, languages) {
   if (!S.brand) { toast('Select a brand first', 'error'); return; }
   const origText = btn.textContent;
   btn.disabled = true;
@@ -2368,6 +2401,7 @@ async function runInlineCycle(cycle, week, postId, btn) {
   try {
     const body = {brand_slug: S.brand, cycle, week: parseInt(week)};
     if (postId) body.post_id = postId;
+    if (languages && languages.length) body.languages = languages;
     const r = await fetch('/api/cycle/run', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
@@ -2413,6 +2447,34 @@ async function runInlineCycle(cycle, week, postId, btn) {
     btn.style.opacity = '1';
     toast('Failed: ' + err.message, 'error');
   }
+}
+
+function getBrandLanguages() {
+  if (!S.brand) return ['English'];
+  const b = S.brands?.find(b => b.slug === S.brand);
+  const langs = b?.languages || b?.profile?.languages;
+  return (langs && langs.length) ? langs : ['English'];
+}
+
+function toggleLangDropdown(btn) {
+  const menu = btn.nextElementSibling;
+  const isOpen = menu.style.display !== 'none';
+  // Close all other open menus first
+  document.querySelectorAll('.lang-menu').forEach(m => m.style.display = 'none');
+  menu.style.display = isOpen ? 'none' : 'block';
+  if (!isOpen) {
+    // Close on outside click
+    const close = e => { if (!menu.contains(e.target) && e.target !== btn) { menu.style.display = 'none'; document.removeEventListener('click', close); } };
+    setTimeout(() => document.addEventListener('click', close), 0);
+  }
+}
+
+function runInlineCycleWithLangs(cycle, week, postId, btn) {
+  // Find the lang-menu sibling in the same cell
+  const cell = btn.closest('td');
+  const checked = [...cell.querySelectorAll('.lang-menu input[type=checkbox]:checked')].map(c => c.value);
+  const langs = checked.length ? checked : getBrandLanguages();
+  runInlineCycle(cycle, week, postId, btn, langs);
 }
 
 async function fetchAndShowCost(jobId) {
@@ -3354,6 +3416,11 @@ async function submitBrandForm() {
       stories_per_day:    parseInt(document.getElementById('bf-freq-stories').value  || 2),
     },
     timezone: document.getElementById('bf-timezone').value || 'UTC',
+    languages: (() => {
+      const checked = [...document.querySelectorAll('#bf-languages input[type=checkbox]:checked')].map(c => c.value);
+      const custom = (document.getElementById('bf-lang-custom').value || '').split(',').map(s => s.trim()).filter(Boolean);
+      return [...new Set([...checked, ...custom])];
+    })(),
   };
 
   // Attach credentials if provided

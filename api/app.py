@@ -96,6 +96,7 @@ class CycleRequest(BaseModel):
     cycle: str = "full"          # full | monitoring | engagement | content | growth | content_single
     week: int = 1                # 1-4
     post_id: Optional[str] = None  # for content_single — generate content for one post
+    languages: Optional[list[str]] = None  # override languages for content generation
 
 class ScheduleRequest(BaseModel):
     brand_slug: str = "luna_silver"
@@ -147,7 +148,7 @@ def _append_log(job_id: str, message: str) -> None:
     _glog(message)
 
 
-def _run_cycle_task(job_id: str, brand_slug: str, cycle: str, week: int, post_id: str | None = None) -> None:
+def _run_cycle_task(job_id: str, brand_slug: str, cycle: str, week: int, post_id: str | None = None, languages: list[str] | None = None) -> None:
     """Background thread: runs the full orchestrator cycle."""
     from orchestrator.orchestrator import Orchestrator
     from rich.console import Console
@@ -275,9 +276,12 @@ def _run_cycle_task(job_id: str, brand_slug: str, cycle: str, week: int, post_id
             strategy = store.load_latest("strategy") or {}
             trends = store.load_latest("trends") or {}
 
-            _append_log(job_id, f"Phase 1/3: Content Agent — caption + hashtags…")
+            # Resolve languages: request override > brand profile > ["English"]
+            langs = languages or brand.get("languages") or ["English"]
+            _append_log(job_id, f"Phase 1/3: Content Agent — caption + hashtags (languages: {', '.join(langs)})…")
             content = orch.content_agent.run({
                 "post_brief": post_brief, "brand_profile": brand, "strategy_plan": strategy,
+                "languages": langs,
             })
             store.save_content(content, post_id)
             _append_log(job_id, "✓ Caption + hashtags generated")
@@ -405,6 +409,7 @@ async def list_brands():
                 "name": p.get("name"),
                 "industry": p.get("industry"),
                 "instagram_handle": p.get("instagram_handle"),
+                "languages": p.get("languages", ["English"]),
                 "source": "built-in",
             })
         except Exception:
@@ -420,6 +425,7 @@ async def list_brands():
                     "name": row["name"],
                     "industry": row.get("industry"),
                     "instagram_handle": row.get("instagram_handle"),
+                    "languages": row.get("languages", ["English"]),
                     "source": "uploaded",
                 })
     else:
@@ -435,6 +441,7 @@ async def list_brands():
                             "name": p.get("name"),
                             "industry": p.get("industry"),
                             "instagram_handle": p.get("instagram_handle"),
+                            "languages": p.get("languages", ["English"]),
                             "source": "uploaded",
                         })
                 except Exception:
@@ -575,7 +582,7 @@ async def run_cycle(req: CycleRequest, background_tasks: BackgroundTasks):
     }
     _glog(f"Cycle queued: brand='{req.brand_slug}' cycle='{req.cycle}' week={req.week} job={job_id}")
     background_tasks.add_task(
-        _run_cycle_task, job_id, req.brand_slug, req.cycle, req.week, req.post_id
+        _run_cycle_task, job_id, req.brand_slug, req.cycle, req.week, req.post_id, req.languages
     )
     return {"job_id": job_id, "status": "queued"}
 
