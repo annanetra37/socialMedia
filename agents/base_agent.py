@@ -110,6 +110,7 @@ class BaseAgent(ABC):
         extra_context: Optional[str] = None,
         max_tokens: int = 8192,
         stream_output: bool = True,
+        use_tools: bool = True,
     ) -> str:
         """
         Run the full Claude agentic loop:
@@ -117,6 +118,9 @@ class BaseAgent(ABC):
           2. Stream response tokens to the console.
           3. If Claude calls a tool, execute it, feed result back, loop.
           4. Return the final accumulated text.
+
+        Set use_tools=False for JSON-extraction phases where tool calls
+        would waste tokens and pollute the response.
         """
         messages: list[dict] = []
 
@@ -126,8 +130,8 @@ class BaseAgent(ABC):
             content = f"{extra_context}\n\n---\n\n{content}"
         messages.append({"role": "user", "content": content})
 
-        # Assemble tools list
-        tools = [t.to_anthropic_tool() for t in self._tool_registry.values()]
+        # Assemble tools list (empty when caller opts out)
+        tools = [t.to_anthropic_tool() for t in self._tool_registry.values()] if use_tools else []
 
         accumulated_text = ""
         iteration = 0

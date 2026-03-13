@@ -47,7 +47,7 @@ You balance:
 ✓ Aligning content with the weekly campaign theme
 ✓ Variety — never two identical post types in a row
 
-Output always ends with structured JSON."""
+Always follow the output format requested by the user message exactly."""
 
     def get_tools(self) -> list[AgentTool]:
         return [
@@ -113,8 +113,11 @@ Output always ends with structured JSON."""
         })
         content_mix = strategy.get('content_mix') or brand.get('content_mix', {})
 
-        # Phase 1 — planning only (narrative + tools, NO JSON output requested)
-        # Keeping JSON out of Phase 1 prevents hitting the token limit mid-JSON.
+        # ── Phase 1: narrative planning with tools ─────────────────────────────
+        # Claude uses tools to fetch posting times & post-count targets, then
+        # outputs the full schedule as readable markdown.  We explicitly ask for
+        # a short, machine-parseable JSON block at the end so we don't need a
+        # second round-trip in most cases.
         prompt = f"""Create a detailed 7-day posting schedule for Week {week}.
 
 BRAND: {brand.get('name')}
@@ -130,46 +133,49 @@ TREND INSIGHTS:
 GROWTH STRATEGY (hooks, CTAs, hashtags):
 {json.dumps(strategy.get('growth_strategy', {}), indent=2)}
 
-Please:
-1. Use get_optimal_slots to get the best posting times
-2. Use calculate_weekly_post_count to determine post type distribution
-3. Plan the complete 7-day schedule as a markdown summary (table or list).
-   Show day, time, post type, brief, hook, CTA, priority.
-   Do NOT output JSON yet — that comes in the next step."""
+Steps:
+1. Call get_optimal_slots to get the best posting times.
+2. Call calculate_weekly_post_count to get the post-type targets.
+3. Output the complete 7-day schedule as a clear markdown summary.
+4. After the markdown, output a JSON block (```json ... ```) containing
+   every post with this schema per post:
+   {{"id":"post_w{week}_N","day":"Monday","date":"YYYY-MM-DD","time":"HH:MM",
+     "type":"reel|carousel|image|story","priority":"high|medium|low",
+     "theme":"...","content_brief":"...","hook":"...","caption_brief":"...",
+     "cta":"...","hashtag_cluster":["tag1"],"visual_notes":"...","status":"planned"}}
+   Wrap the full array in:
+   {{"week_number":{week},"theme":"...","posts":[...],"weekly_summary":{{"total_posts":N,"reels":N,"carousels":N,"images":N,"stories":N}}}}"""
 
         raw = self.call_claude(prompt, max_tokens=16000)
 
-        # Phase 2 — JSON-only call.
-        # IMPORTANT: pass `raw` as extra_context so Claude has the full Phase 1
-        # plan in its conversation window. Without it Phase 2 starts with an
-        # empty message history and has nothing to convert.
-        json_prompt = (
-            f"The campaign schedule above has been fully planned for Week {week}. "
-            "Now output ONLY the raw JSON — no markdown, no code fences, no explanation. "
-            "Do not call any tools. Start your response with {{ and end with }}. "
-            "Include every single post from the plan above.\n\n"
-            "Required schema:\n"
-            '{{"week_number": ' + str(week) + ', "theme": "...", "posts": ['
-            '{{"id": "post_w' + str(week) + '_1", "day": "Monday", "date": "YYYY-MM-DD", '
-            '"time": "HH:MM", "type": "reel|carousel|image|story", '
-            '"priority": "high|medium|low", "theme": "...", "content_brief": "...", '
-            '"hook": "...", "caption_brief": "...", "cta": "...", '
-            '"hashtag_cluster": ["tag1"], "visual_notes": "...", "status": "planned"}},'
-            ' ...all posts...], '
-            '"weekly_summary": {{"total_posts": N, "reels": N, "carousels": N, "images": N, "stories": N}}}}'
-        )
-        raw_json = self.call_claude(
-            json_prompt,
-            extra_context=raw,   # ← Phase 1 full output as context
-            max_tokens=16000,
-            stream_output=False,
-        )
-
-        plan = self.extract_json(raw_json)
-
-        # Fallback: try the Phase 1 narrative (may contain a ```json block)
+        # ── Phase 2: JSON extraction fallback ──────────────────────────────────
+        # If Phase 1 already embedded a ```json block, extract_json will catch it
+        # below without any extra API call.  Only if that fails do we ask Claude
+        # to produce pure JSON — with use_tools=False so no tool round-trips
+        # waste tokens, and extra_context=raw so Claude has the full plan.
+        plan = self.extract_json(raw)
         if not plan.get("posts"):
-            plan = self.extract_json(raw) or plan
+            json_prompt = (
+                f"Convert the campaign schedule above into raw JSON only. "
+                "No markdown, no explanation, no code fences. "
+                f"Start with {{ and end with }}. Include every post.\n\n"
+                "Schema: "
+                '{{"week_number":' + str(week) + ',"theme":"...","posts":['
+                '{{"id":"post_w' + str(week) + '_1","day":"Monday","date":"YYYY-MM-DD",'
+                '"time":"HH:MM","type":"reel|carousel|image|story",'
+                '"priority":"high|medium|low","theme":"...","content_brief":"...",'
+                '"hook":"...","caption_brief":"...","cta":"...",'
+                '"hashtag_cluster":["tag1"],"visual_notes":"...","status":"planned"}},'
+                '...],"weekly_summary":{{"total_posts":N,"reels":N,"carousels":N,"images":N,"stories":N}}}}'
+            )
+            raw_json = self.call_claude(
+                json_prompt,
+                extra_context=raw,    # full Phase 1 plan as context
+                max_tokens=16000,
+                stream_output=False,
+                use_tools=False,      # no tool calls — pure JSON output only
+            )
+            plan = self.extract_json(raw_json)
 
         # Last resort: store raw so the user can see what happened
         if not plan.get("posts"):
