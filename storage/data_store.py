@@ -100,6 +100,17 @@ class DataStore:
             return _db.get_latest_data(self.brand_slug, category)
         return self._fs_load_latest(category)
 
+    def load_all(self, category: str) -> list[Any]:
+        """Return data from every file/row in a category."""
+        if _USE_DB:
+            return [row for row in _db.get_all_by_type(self.brand_slug, category)]
+        results = []
+        for fname in self._fs_list(category):
+            data = self._fs_load(category, fname)
+            if data:
+                results.append(data)
+        return results
+
     # ── Brand profile ──────────────────────────────────────────────────────────
 
     def save_brand_profile(self, profile: dict) -> Optional[Path]:
