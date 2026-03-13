@@ -360,26 +360,36 @@ class BaseAgent(ABC):
         Extract the first valid JSON object or array from a text block.
 
         Strategy (in order):
-        1. Extract the content of an explicit ```json … ``` code fence — the most
-           reliable signal when agents output narrative + JSON.
+        1. Extract the LARGEST ```json … ``` code fence — the most reliable
+           signal when agents output narrative + JSON.
         2. Strip all fences and try to parse the whole text directly.
         3. Scan from the END of the text for the last { … } or [ … ] block,
            because agents typically output explanatory prose first then JSON last.
+           Only consider blocks large enough to plausibly contain campaign data
+           (> 50 chars) to skip tiny JSON fragments in markdown tables.
         """
         import re as _re
 
-        # 1. Extract from explicit ```json ... ``` fence
+        # 1. Extract from explicit ```json ... ``` fence — try ALL matches
+        #    and pick the largest valid one (in case there are small inline
+        #    JSON snippets before the main payload).
+        best: dict | None = None
+        best_len = 0
         for pattern in (
             r"```json\s*([\s\S]+?)```",
             r"```JSON\s*([\s\S]+?)```",
         ):
-            m = _re.search(pattern, text, _re.DOTALL)
-            if m:
+            for m in _re.finditer(pattern, text, _re.DOTALL):
                 candidate = m.group(1).strip()
                 try:
-                    return json.loads(candidate)
+                    parsed = json.loads(candidate)
+                    if isinstance(parsed, dict) and len(candidate) > best_len:
+                        best = parsed
+                        best_len = len(candidate)
                 except json.JSONDecodeError:
                     pass
+        if best is not None:
+            return best
 
         # 2. Strip fences and try whole-text parse
         cleaned = text
@@ -393,19 +403,36 @@ class BaseAgent(ABC):
             pass
 
         # 3. Scan from the END for the last complete { … } or [ … ] block
-        #    (agents put JSON at the end after narrative prose)
+        #    (agents put JSON at the end after narrative prose).
+        #    Skip tiny fragments (< 50 chars) that are likely markdown artefacts.
         for start_char, end_char in [('{', '}'), ('[', ']')]:
             positions = [i for i, ch in enumerate(cleaned) if ch == start_char]
             for start_pos in reversed(positions):
                 depth = 0
+                in_string = False
+                escape = False
                 for i, ch in enumerate(cleaned[start_pos:], start_pos):
+                    if escape:
+                        escape = False
+                        continue
+                    if ch == '\\' and in_string:
+                        escape = True
+                        continue
+                    if ch == '"' and not escape:
+                        in_string = not in_string
+                        continue
+                    if in_string:
+                        continue
                     if ch == start_char:
                         depth += 1
                     elif ch == end_char:
                         depth -= 1
                         if depth == 0:
+                            block = cleaned[start_pos: i + 1]
+                            if len(block) < 50:
+                                break  # too small, skip
                             try:
-                                return json.loads(cleaned[start_pos: i + 1])
+                                return json.loads(block)
                             except json.JSONDecodeError:
                                 break
         return {}

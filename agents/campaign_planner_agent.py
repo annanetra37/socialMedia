@@ -113,11 +113,11 @@ Always follow the output format requested by the user message exactly."""
         })
         content_mix = strategy.get('content_mix') or brand.get('content_mix', {})
 
-        # ── Phase 1: narrative planning with tools ─────────────────────────────
+        # ── Phase 1: tool calls + JSON-only output ────────────────────────────
         # Claude uses tools to fetch posting times & post-count targets, then
-        # outputs the full schedule as readable markdown.  We explicitly ask for
-        # a short, machine-parseable JSON block at the end so we don't need a
-        # second round-trip in most cases.
+        # outputs the schedule DIRECTLY as a JSON object.  No markdown narrative
+        # — this avoids wasting tokens on prose that can't be parsed and
+        # prevents hitting the output token limit before the JSON appears.
         prompt = f"""Create a detailed 7-day posting schedule for Week {week}.
 
 BRAND: {brand.get('name')}
@@ -136,30 +136,39 @@ GROWTH STRATEGY (hooks, CTAs, hashtags):
 Steps:
 1. Call get_optimal_slots to get the best posting times.
 2. Call calculate_weekly_post_count to get the post-type targets.
-3. Output the complete 7-day schedule as a clear markdown summary.
-4. After the markdown, output a JSON block (```json ... ```) containing
-   every post with this schema per post:
-   {{"id":"post_w{week}_N","day":"Monday","date":"YYYY-MM-DD","time":"HH:MM",
-     "type":"reel|carousel|image|story","priority":"high|medium|low",
-     "theme":"...","content_brief":"...","hook":"...","caption_brief":"...",
-     "cta":"...","hashtag_cluster":["tag1"],"visual_notes":"...","status":"planned"}}
-   Wrap the full array in:
-   {{"week_number":{week},"theme":"...","posts":[...],"weekly_summary":{{"total_posts":N,"reels":N,"carousels":N,"images":N,"stories":N}}}}"""
+3. Output the result ONLY as a single ```json``` code block — no markdown tables,
+   no commentary before or after, JUST the JSON. Keep content_brief and hook
+   values concise (1-2 sentences each).
 
-        raw = self.call_claude(prompt, max_tokens=16000)
+The JSON must match this exact schema:
+```
+{{"week_number":{week},"theme":"<week theme>","posts":[
+  {{"id":"post_w{week}_1","day":"Monday","date":"YYYY-MM-DD","time":"HH:MM",
+    "type":"reel|carousel|image|story","priority":"high|medium|low",
+    "theme":"...","content_brief":"...","hook":"...","caption_brief":"...",
+    "cta":"...","hashtag_cluster":["tag1","tag2"],"visual_notes":"...","status":"planned"}},
+  ...
+],"weekly_summary":{{"total_posts":N,"reels":N,"carousels":N,"images":N,"stories":N}}}}
+```
 
-        # ── Phase 2: JSON extraction fallback ──────────────────────────────────
-        # If Phase 1 already embedded a ```json block, extract_json will catch it
-        # below without any extra API call.  Only if that fails do we ask Claude
-        # to produce pure JSON — with use_tools=False so no tool round-trips
-        # waste tokens, and extra_context=raw so Claude has the full plan.
+IMPORTANT: Output ONLY the JSON object. No markdown summary, no tables, no explanations."""
+
+        raw = self.call_claude(prompt, max_tokens=12000)
+
+        # ── Phase 2: JSON extraction + fallback ─────────────────────────────────
         plan = self.extract_json(raw)
+
         if not plan.get("posts"):
+            # Phase 1 didn't produce parseable JSON with posts.
+            # Re-ask with a tight, JSON-only prompt, lower max_tokens to save cost.
+            # Truncate the Phase 1 context to the first 4000 chars to avoid
+            # wasting input tokens on the full narrative.
+            truncated_context = raw[:4000] if len(raw) > 4000 else raw
             json_prompt = (
-                f"Convert the campaign schedule above into raw JSON only. "
-                "No markdown, no explanation, no code fences. "
-                f"Start with {{ and end with }}. Include every post.\n\n"
-                "Schema: "
+                "Extract the campaign posts from the schedule above and return "
+                "ONLY a JSON object. No markdown, no explanation. "
+                f"Start with {{ and end with }}.\n\n"
+                "Required schema:\n"
                 '{{"week_number":' + str(week) + ',"theme":"...","posts":['
                 '{{"id":"post_w' + str(week) + '_1","day":"Monday","date":"YYYY-MM-DD",'
                 '"time":"HH:MM","type":"reel|carousel|image|story",'
@@ -170,16 +179,29 @@ Steps:
             )
             raw_json = self.call_claude(
                 json_prompt,
-                extra_context=raw,    # full Phase 1 plan as context
-                max_tokens=16000,
+                extra_context=truncated_context,
+                max_tokens=8000,
                 stream_output=False,
-                use_tools=False,      # no tool calls — pure JSON output only
+                use_tools=False,
             )
             plan = self.extract_json(raw_json)
 
-        # Last resort: store raw so the user can see what happened
-        if not plan.get("posts"):
-            plan = {"raw_response": raw, "posts": [], "week_number": week}
+        # Ensure weekly_summary is always present and consistent with posts
+        if plan.get("posts"):
+            posts = plan["posts"]
+            plan["weekly_summary"] = {
+                "total_posts": len(posts),
+                "reels": sum(1 for p in posts if p.get("type") == "reel"),
+                "carousels": sum(1 for p in posts if p.get("type") == "carousel"),
+                "images": sum(1 for p in posts if p.get("type") == "image"),
+                "stories": sum(1 for p in posts if p.get("type") == "story"),
+            }
+            plan.setdefault("week_number", week)
+        else:
+            # Last resort: store raw so the user can see what happened
+            plan = {"raw_response": raw, "posts": [], "week_number": week,
+                    "weekly_summary": {"total_posts": 0, "reels": 0,
+                                       "carousels": 0, "images": 0, "stories": 0}}
 
         self.print_result("Posts scheduled", len(plan.get("posts", [])))
         return plan
