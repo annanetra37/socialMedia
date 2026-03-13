@@ -132,13 +132,14 @@ Always output structured JSON at the end of your report."""
         """
         inputs: {
             "brand_profile": dict,
-            "strategy_plan": dict
+            "strategy_plan": dict (optional — may be empty on first run)
         }
         returns: trend_report dict
         """
         self.print_header("Scanning trends")
 
         brand = inputs["brand_profile"]
+        strategy = inputs.get("strategy_plan") or {}
         industry = brand.get("industry", "jewellery")
 
         if RUN_MODE == "demo":

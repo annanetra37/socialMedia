@@ -165,24 +165,25 @@ def _run_cycle_task(job_id: str, brand_slug: str, cycle: str, week: int) -> None
         _append_log(job_id, f"Orchestrator ready — mode={RUN_MODE}")
 
         if cycle == "full":
-            _append_log(job_id, "Phase 1/8: Strategy Agent…")
             results = {}
-
             month = datetime.now().strftime("%B %Y")
+
+            _append_log(job_id, "Phase 1/8: Trend Research Agent…")
+            trends = orch.trend_agent.run({"brand_profile": brand, "strategy_plan": {}})
+            store.save_trend_report(trends)
+            results["trends"] = trends
+            _append_log(job_id, f"✓ Trends complete — {len(trends.get('trending_topics', []))} topics")
+
+            _append_log(job_id, "Phase 2/8: Strategy Agent…")
             strategy = orch.strategy_agent.run({
                 "brand_profile": brand,
                 "past_analytics": brand.get("past_performance", {}),
+                "trend_report": trends,
                 "month": month,
             })
             store.save_strategy(strategy)
             results["strategy"] = strategy
             _append_log(job_id, f"✓ Strategy complete — {len(strategy.get('campaign_themes', []))} themes")
-
-            _append_log(job_id, "Phase 2/8: Trend Research Agent…")
-            trends = orch.trend_agent.run({"brand_profile": brand, "strategy_plan": strategy})
-            store.save_trend_report(trends)
-            results["trends"] = trends
-            _append_log(job_id, f"✓ Trends complete — {len(trends.get('trending_topics', []))} topics")
 
             _append_log(job_id, f"Phase 3/8: Campaign Planner (week {week})…")
             campaign = orch.campaign_agent.run({
@@ -678,6 +679,43 @@ async def get_result_section(brand_slug: str, section: str):
         return {"data": None}
     files = store.list_files(folder)
     return {"section": section, "file": files[-1] if files else None, "data": data}
+
+
+@app.put("/api/brands/{brand_slug}/content/{post_id}")
+async def update_content(brand_slug: str, post_id: str, request: Request):
+    """Update a content package (caption, hashtags, etc.) in-place."""
+    store = DataStore.from_slug(brand_slug)
+    existing = store.load("content", f"{post_id}.json")
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"No content for '{post_id}'")
+
+    body = await request.json()
+    # Merge updates into existing content
+    if "caption" in body:
+        cap = body["caption"]
+        if isinstance(cap, dict):
+            existing.setdefault("caption", {}).update(cap)
+            # Rebuild full_caption from parts
+            parts = [existing["caption"].get("hook", ""),
+                     existing["caption"].get("body", ""),
+                     existing["caption"].get("cta", "")]
+            ht = existing.get("hashtags", {})
+            full_set = ht.get("full_set", "") if isinstance(ht, dict) else ""
+            existing["caption"]["full_caption"] = "\n\n".join(p for p in parts if p)
+            if full_set:
+                existing["caption"]["full_caption"] += "\n\n" + full_set
+            existing["caption"]["character_count"] = len(existing["caption"]["full_caption"])
+        else:
+            existing["caption"] = cap
+    if "hashtags" in body:
+        existing["hashtags"] = body["hashtags"]
+    if "alt_text" in body:
+        existing["alt_text"] = body["alt_text"]
+    if "content_notes" in body:
+        existing["content_notes"] = body["content_notes"]
+
+    store.save_content(existing, post_id)
+    return {"status": "updated", "post_id": post_id}
 
 
 @app.post("/api/brands/{brand_slug}/posts/{post_id}/publish-now")

@@ -77,8 +77,8 @@ class Orchestrator:
     def run_full_cycle(self, week_number: int = 1) -> dict:
         """
         Run the complete AI Social Media OS cycle:
-        1. Monthly Strategy (if first run or new month)
-        2. Trend Research
+        1. Trend Research (brand-only — fresh market data first)
+        2. Monthly Strategy (informed by trends + analytics)
         3. Campaign Planning (for specified week)
         4. Content + Visual + Reel generation
         5. Engagement processing
@@ -90,21 +90,21 @@ class Orchestrator:
         results: dict = {}
         month = datetime.now().strftime("%B %Y")
 
-        # ── 1. Strategy ────────────────────────────────────────────────────────
-        strategy = self._run_phase(
-            "📋 STRATEGY", "Monthly strategy generation",
-            lambda: self._run_strategy(month),
-        )
-        results["strategy"] = strategy
-        self.store.save_strategy(strategy)
-
-        # ── 2. Trend Research ──────────────────────────────────────────────────
+        # ── 1. Trend Research (runs first — brand profile only) ──────────────
         trends = self._run_phase(
             "🔍 TREND RESEARCH", "Scanning latest trends",
-            lambda: self._run_trends(strategy),
+            lambda: self._run_trends(),
         )
         results["trends"] = trends
         self.store.save_trend_report(trends)
+
+        # ── 2. Strategy (informed by fresh trends) ───────────────────────────
+        strategy = self._run_phase(
+            "📋 STRATEGY", "Monthly strategy generation",
+            lambda: self._run_strategy(month, trends),
+        )
+        results["strategy"] = strategy
+        self.store.save_strategy(strategy)
 
         # ── 3. Campaign Planning ───────────────────────────────────────────────
         campaign = self._run_phase(
@@ -232,35 +232,37 @@ class Orchestrator:
     # ── Granular single-phase blocks ──────────────────────────────────────────
 
     def run_strategy_block(self) -> dict:
-        """Run just the Strategy Agent (monthly strategy)."""
-        self._print_block_header("1", "STRATEGY", "📋")
+        """Run just the Strategy Agent (loads trends if available)."""
+        self._print_block_header("2", "STRATEGY", "📋")
         month = datetime.now().strftime("%B %Y")
-        strategy = self._run_strategy(month)
+        trends = self.store.load_trend_report() or {}
+        strategy = self._run_strategy(month, trends)
         self.store.save_strategy(strategy)
         return {"strategy": strategy}
 
     def run_trends_block(self) -> dict:
-        """Run just the Trend Research Agent."""
-        self._print_block_header("2", "TREND RESEARCH", "🔍")
-        strategy = self.store.load_strategy() or {}
-        trends = self._run_trends(strategy)
+        """Run just the Trend Research Agent (brand-only, no strategy needed)."""
+        self._print_block_header("1", "TREND RESEARCH", "🔍")
+        trends = self._run_trends()
         self.store.save_trend_report(trends)
         return {"trends": trends}
 
     def run_campaign_block(self, week: int = 1) -> dict:
-        """Run just the Campaign Planner Agent (requires strategy; auto-generates if missing)."""
+        """Run just the Campaign Planner Agent (auto-generates prerequisites if missing)."""
         self._print_block_header("3", "CAMPAIGN PLANNER", "📅")
         month = datetime.now().strftime("%B %Y")
-        strategy = self.store.load_strategy() or {}
-        if not strategy:
-            self.console.print("  [dim]No strategy found — generating strategy first…[/dim]")
-            strategy = self._run_strategy(month)
-            self.store.save_strategy(strategy)
+        # Trends first (brand-only)
         trends = self.store.load_trend_report() or {}
         if not trends:
             self.console.print("  [dim]No trend report — generating trends first…[/dim]")
-            trends = self._run_trends(strategy)
+            trends = self._run_trends()
             self.store.save_trend_report(trends)
+        # Strategy second (informed by trends)
+        strategy = self.store.load_strategy() or {}
+        if not strategy:
+            self.console.print("  [dim]No strategy found — generating strategy first…[/dim]")
+            strategy = self._run_strategy(month, trends)
+            self.store.save_strategy(strategy)
         campaign = self._run_campaign(strategy, trends, week)
         self.store.save_campaign(campaign, week=week)
         return {"campaign": campaign, "strategy": strategy, "trends": trends}
@@ -287,17 +289,18 @@ class Orchestrator:
     # PRIVATE: individual agent runners
     # ══════════════════════════════════════════════════════════════════════════
 
-    def _run_strategy(self, month: str) -> dict:
+    def _run_strategy(self, month: str, trends: dict | None = None) -> dict:
         return self.strategy_agent.run({
             "brand_profile": self.brand,
             "past_analytics": self.brand.get("past_performance", {}),
+            "trend_report": trends or {},
             "month": month,
         })
 
-    def _run_trends(self, strategy: dict) -> dict:
+    def _run_trends(self, strategy: dict | None = None) -> dict:
         return self.trend_agent.run({
             "brand_profile": self.brand,
-            "strategy_plan": strategy,
+            "strategy_plan": strategy or {},
         })
 
     def _run_campaign(self, strategy: dict, trends: dict, week: int) -> dict:

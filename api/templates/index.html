@@ -1074,9 +1074,17 @@ tr:hover td { background: rgba(108,99,255,.04); }
 
       <!-- Step 4: Products -->
       <div id="bf-step-4" style="display:none;">
-        <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">Add your key products or services. Price in USD (optional).</p>
+        <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">Add your key products or services. You can also bulk-upload photos and name them afterwards.</p>
         <div id="bf-products-list"></div>
-        <button class="btn btn-ghost btn-sm" onclick="addProduct()" style="margin-top:4px;">+ Add Product</button>
+        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
+          <button class="btn btn-ghost btn-sm" onclick="addProduct()">+ Add Product</button>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('bulk-photo-input').click()">📷 Upload Multiple Photos</button>
+          <input type="file" id="bulk-photo-input" accept="image/jpeg,image/png,image/webp" multiple style="display:none" onchange="onBulkPhotosSelected(this)">
+        </div>
+        <div id="bulk-photo-preview" style="display:none;margin-top:12px;border:1px solid var(--border);border-radius:8px;padding:12px;">
+          <p style="font-size:12px;color:var(--muted);margin-bottom:8px;">Name your uploaded photos:</p>
+          <div id="bulk-photo-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;"></div>
+        </div>
       </div>
 
       <!-- Step 5: Goals & Content Mix -->
@@ -1683,14 +1691,29 @@ function renderContent() {
       </div>
       <div class="content-card-body">
         <div class="content-card-id">${esc(postId)}</div>
-        <div class="content-card-hook">${esc(hook)}</div>
+        <div class="content-card-hook" id="hook-${postId}">${esc(hook)}</div>
         <div class="accordion">
           ${accordionItem('caption-'+idx, '📝 Caption',
-            `<div class="caption-pre">${esc(captionText)}</div>
-             <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="copyText(${JSON.stringify(captionText)},this)">📋 Copy</button>`
+            `<div class="caption-pre" id="caption-view-${postId}">${esc(captionText)}</div>
+             <div id="caption-edit-${postId}" style="display:none">
+               <label style="font-size:11px;color:var(--muted);margin-bottom:2px;display:block">Hook</label>
+               <textarea class="form-input" id="edit-hook-${postId}" rows="2" style="width:100%;margin-bottom:6px;font-size:12px">${esc(typeof caption==='object'?(caption.hook||''):caption)}</textarea>
+               <label style="font-size:11px;color:var(--muted);margin-bottom:2px;display:block">Body</label>
+               <textarea class="form-input" id="edit-body-${postId}" rows="4" style="width:100%;margin-bottom:6px;font-size:12px">${esc(typeof caption==='object'?(caption.body||''):'')}</textarea>
+               <label style="font-size:11px;color:var(--muted);margin-bottom:2px;display:block">CTA</label>
+               <textarea class="form-input" id="edit-cta-${postId}" rows="2" style="width:100%;font-size:12px">${esc(typeof caption==='object'?(caption.cta||''):'')}</textarea>
+             </div>
+             <div style="display:flex;gap:6px;margin-top:8px;">
+               <button class="btn btn-ghost btn-sm" onclick="copyText(${JSON.stringify(captionText)},this)">📋 Copy</button>
+               <button class="btn btn-ghost btn-sm" id="edit-btn-${postId}" onclick="toggleContentEdit('${postId}')">✏️ Edit</button>
+               <button class="btn btn-primary btn-sm" id="save-btn-${postId}" style="display:none" onclick="saveContentEdit('${esc(S.brand)}','${postId}')">Save</button>
+             </div>`
           )}
           ${accordionItem('hashtags-'+idx, '# Hashtags',
-            `<div class="hashtag-pills">${Array.isArray(hashtags) ? hashtags.map(h=>`<span class="hashtag-pill">${esc(h)}</span>`).join('') : esc(hashtags)}</div>
+            `<div class="hashtag-pills" id="ht-view-${postId}">${Array.isArray(hashtags) ? hashtags.map(h=>`<span class="hashtag-pill">${esc(h)}</span>`).join('') : esc(hashtags)}</div>
+             <div id="ht-edit-${postId}" style="display:none;margin-top:6px">
+               <textarea class="form-input" id="edit-ht-${postId}" rows="2" style="width:100%;font-size:12px" placeholder="#tag1 #tag2 …">${esc(typeof hashtags==='object'&&hashtags?.full_set?hashtags.full_set:(Array.isArray(hashtags)?hashtags.join(' '):hashtags||''))}</textarea>
+             </div>
              <button class="btn btn-ghost btn-sm" onclick="copyText(${JSON.stringify(Array.isArray(hashtags)?hashtags.join(' '):hashtags)},this)">📋 Copy All</button>`
           )}
           ${accordionItem('visual-'+idx, '🖼 Visual Brief',
@@ -1725,6 +1748,51 @@ function toggleAccordion(id, hd) {
   const isOpen = body.classList.contains('open');
   body.classList.toggle('open', !isOpen);
   hd.classList.toggle('open', !isOpen);
+}
+
+// ═══════════════════ CONTENT EDITING ═══════════════════
+function toggleContentEdit(postId) {
+  const view = document.getElementById('caption-view-'+postId);
+  const edit = document.getElementById('caption-edit-'+postId);
+  const htView = document.getElementById('ht-view-'+postId);
+  const htEdit = document.getElementById('ht-edit-'+postId);
+  const editBtn = document.getElementById('edit-btn-'+postId);
+  const saveBtn = document.getElementById('save-btn-'+postId);
+  const isEditing = edit.style.display !== 'none';
+  view.style.display = isEditing ? '' : 'none';
+  edit.style.display = isEditing ? 'none' : '';
+  if (htView) htView.style.display = isEditing ? '' : 'none';
+  if (htEdit) htEdit.style.display = isEditing ? 'none' : '';
+  editBtn.textContent = isEditing ? '✏️ Edit' : '✏️ Cancel';
+  saveBtn.style.display = isEditing ? 'none' : '';
+}
+
+async function saveContentEdit(brandSlug, postId) {
+  const hook = document.getElementById('edit-hook-'+postId)?.value || '';
+  const body = document.getElementById('edit-body-'+postId)?.value || '';
+  const cta  = document.getElementById('edit-cta-'+postId)?.value || '';
+  const htRaw = document.getElementById('edit-ht-'+postId)?.value || '';
+  const htArr = htRaw.split(/\s+/).filter(h => h.startsWith('#'));
+
+  const saveBtn = document.getElementById('save-btn-'+postId);
+  saveBtn.textContent = 'Saving…';
+  saveBtn.disabled = true;
+  try {
+    const r = await fetch(`/api/brands/${brandSlug}/content/${postId}`, {
+      method: 'PUT',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        caption: { hook, body, cta },
+        hashtags: { primary: htArr.slice(0,5), secondary: htArr.slice(5,10), niche: htArr.slice(10), full_set: htArr.join(' ') }
+      })
+    });
+    if (!r.ok) throw new Error('Save failed');
+    saveBtn.textContent = 'Saved!';
+    setTimeout(() => { loadContent(); }, 600);
+  } catch(e) {
+    saveBtn.textContent = 'Error!';
+    setTimeout(() => { saveBtn.textContent = 'Save'; saveBtn.disabled = false; }, 1500);
+  }
 }
 
 // ═══════════════════ ENGAGEMENT ═══════════════════
@@ -2991,6 +3059,37 @@ function onProductImageSelected(idx, input) {
   const url = URL.createObjectURL(file);
   btn.innerHTML = `<img src="${url}" alt="product">`;
 }
+function onBulkPhotosSelected(input) {
+  const files = Array.from(input.files);
+  if (!files.length) return;
+  const preview = document.getElementById('bulk-photo-preview');
+  const grid = document.getElementById('bulk-photo-grid');
+  preview.style.display = '';
+  // Append new photos (don't clear existing ones)
+  files.forEach(file => {
+    const idx = addProduct(); // creates a product row
+    _productImages[idx] = file;
+    const url = URL.createObjectURL(file);
+    // Update the product row's image button
+    const btn = document.getElementById(`prod-imgbtn-${idx}`);
+    if (btn) btn.innerHTML = `<img src="${url}" alt="product">`;
+    // Also show in the bulk grid with name input
+    const card = document.createElement('div');
+    card.style.cssText = 'text-align:center;';
+    card.innerHTML = `
+      <img src="${url}" style="width:100%;height:100px;object-fit:cover;border-radius:6px;border:1px solid var(--border);">
+      <input type="text" class="form-input" style="margin-top:4px;font-size:11px;padding:4px 6px;" placeholder="Photo name…"
+             onchange="document.getElementById('prod-name-${idx}').value=this.value" id="bulk-name-${idx}">`;
+    grid.appendChild(card);
+    // Pre-fill name from filename (without extension)
+    const baseName = file.name.replace(/\.[^.]+$/, '').replace(/[_-]/g, ' ');
+    const nameInput = card.querySelector('input[type=text]');
+    nameInput.value = baseName;
+    document.getElementById(`prod-name-${idx}`).value = baseName;
+  });
+  input.value = ''; // allow re-selecting same files
+}
+
 async function uploadProductImages(brandSlug) {
   for (const [idx, file] of Object.entries(_productImages)) {
     try {
