@@ -117,12 +117,30 @@ text placement, and how the visual looks as a thumbnail at 50x50px."""
             return self._demo_output(post, brand, content)
 
         # ── Decide primary image source ────────────────────────────────────────
-        # If the brand has uploaded product photos, use them directly.
+        # If the content agent already selected a specific product photo, use it.
+        # Otherwise, if the brand has uploaded product photos, use them.
         # DALL-E is only used when no real photos are available.
         products = brand.get("products", [])
         has_product_photos = bool(products)
+        selected_idx = content.get("selected_product_idx")
+        selected_url = content.get("selected_product_photo_url")
 
-        if has_product_photos:
+        if selected_idx is not None and selected_url:
+            # Content agent already picked a specific photo — tell visual agent to use it
+            p = products[selected_idx] if selected_idx < len(products) else {}
+            product_photo_block = (
+                f"ASSIGNED PRODUCT PHOTO (Content Agent selected this — use it as primary image):\n"
+                f"  Product: {p.get('name', 'Product')}\n"
+                f"  Photo URL: {selected_url}\n"
+                f"  Index: {selected_idx}"
+            )
+            dalle_instruction = (
+                f"The Content Agent already selected product photo [{selected_idx}] for this post. "
+                f"Set primary_image.product_photo_url to \"{selected_url}\". "
+                "Do NOT call generate_dalle_image. "
+                "Only call generate_image_prompt to write a backup AI prompt description."
+            )
+        elif has_product_photos:
             slug = _brand_slug(brand.get("name", "brand"))
             # Build the product list for the prompt (same as content agent context)
             product_lines = []

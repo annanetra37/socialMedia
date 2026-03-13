@@ -278,11 +278,30 @@ def _run_cycle_task(job_id: str, brand_slug: str, cycle: str, week: int, post_id
 
             # Resolve languages: request override > brand profile > ["English"]
             langs = languages or brand.get("languages") or ["English"]
+
+            # Get available (unused) product photo indices for image posts
+            post_type = (post_brief.get("type") or "post").lower()
+            available_photos = None
+            if post_type == "image":
+                available_photos = store.get_available_product_indices(brand)
+                if available_photos:
+                    _append_log(job_id, f"Available unused photos: indices {available_photos}")
+                else:
+                    _append_log(job_id, "No product photos uploaded — skipping photo assignment")
+
             _append_log(job_id, f"Phase 1/3: Content Agent — caption + hashtags (languages: {', '.join(langs)})…")
             content = orch.content_agent.run({
                 "post_brief": post_brief, "brand_profile": brand, "strategy_plan": strategy,
                 "languages": langs,
+                "available_photo_indices": available_photos,
             })
+
+            # Track the used photo so it won't be reused
+            selected_idx = content.get("selected_product_idx")
+            if selected_idx is not None:
+                store.save_used_image(int(selected_idx), post_id)
+                _append_log(job_id, f"✓ Product photo [{selected_idx}] assigned and marked as used")
+
             store.save_content(content, post_id)
             _append_log(job_id, "✓ Caption + hashtags generated")
 
