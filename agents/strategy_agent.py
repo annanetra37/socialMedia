@@ -89,6 +89,7 @@ Always output structured JSON at the end of your analysis."""
         inputs: {
             "brand_profile": dict,
             "past_analytics": dict (optional — can be empty),
+            "trend_report": dict (optional — current trend insights),
             "month": str  e.g. "March 2026"
         }
         returns: strategy_plan dict
@@ -97,6 +98,18 @@ Always output structured JSON at the end of your analysis."""
 
         brand = inputs["brand_profile"]
         month = inputs.get("month", datetime.now().strftime("%B %Y"))
+        trends = inputs.get("trend_report") or {}
+
+        # Build optional trend context block
+        trend_context = ""
+        if trends:
+            trend_context = f"""
+CURRENT TREND INSIGHTS (use these to inform your strategy):
+Trending topics: {json.dumps(trends.get('trending_topics', [])[:5], indent=2)}
+Viral formats: {json.dumps(trends.get('viral_formats', []), indent=2)}
+Trending hashtags: {json.dumps(trends.get('trending_hashtags', {}), indent=2)}
+Top recommendations: {json.dumps(trends.get('top_recommendations', []), indent=2)}
+"""
 
         prompt = f"""Please create a comprehensive monthly social media strategy for:
 
@@ -104,11 +117,11 @@ BRAND PROFILE:
 {json.dumps(brand, indent=2)}
 
 TARGET MONTH: {month}
-
+{trend_context}
 Tasks to complete:
 1. Use the analyse_competitor tool for each competitor listed in the brand profile
 2. Use the calculate_content_mix tool with the past_performance and goals data
-3. Based on your analysis, produce a complete strategy document
+3. Based on your analysis and the trend insights above, produce a complete strategy document
 
 Your output must end with a JSON block in this exact structure:
 ```json
