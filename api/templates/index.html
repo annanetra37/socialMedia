@@ -825,24 +825,53 @@ tr:hover td { background: rgba(108,99,255,.04); }
   <div class="detail-body">
     <!-- Caption tab -->
     <div id="dtab-caption">
-      <div class="detail-section">
-        <div class="detail-section-label">Hook</div>
-        <div class="detail-text" id="dp-hook"></div>
+      <!-- View mode -->
+      <div id="dp-caption-view">
+        <div class="detail-section">
+          <div class="detail-section-label">Hook</div>
+          <div class="detail-text" id="dp-hook"></div>
+        </div>
+        <div class="detail-section">
+          <div class="detail-section-label">Body</div>
+          <div class="detail-text" id="dp-body"></div>
+        </div>
+        <div class="detail-section">
+          <div class="detail-section-label">Call to Action</div>
+          <div class="detail-text" id="dp-cta"></div>
+        </div>
       </div>
-      <div class="detail-section">
-        <div class="detail-section-label">Body</div>
-        <div class="detail-text" id="dp-body"></div>
+      <!-- Edit mode -->
+      <div id="dp-caption-edit" style="display:none;">
+        <div class="detail-section">
+          <div class="detail-section-label">Hook</div>
+          <textarea class="form-input" id="dp-edit-hook" rows="3" style="width:100%;font-size:13px;"></textarea>
+        </div>
+        <div class="detail-section">
+          <div class="detail-section-label">Body</div>
+          <textarea class="form-input" id="dp-edit-body" rows="6" style="width:100%;font-size:13px;"></textarea>
+        </div>
+        <div class="detail-section">
+          <div class="detail-section-label">Call to Action</div>
+          <textarea class="form-input" id="dp-edit-cta" rows="2" style="width:100%;font-size:13px;"></textarea>
+        </div>
       </div>
-      <div class="detail-section">
-        <div class="detail-section-label">Call to Action</div>
-        <div class="detail-text" id="dp-cta"></div>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <button class="btn btn-ghost btn-sm" onclick="togglePanelEdit()" id="dp-edit-btn">✏️ Edit</button>
+        <button class="btn btn-primary btn-sm" onclick="savePanelEdit()" id="dp-save-btn" style="display:none;">Save</button>
+        <button class="btn btn-ghost btn-sm" onclick="copyPanelCaption()" id="btn-copy-caption">📋 Copy Caption</button>
       </div>
-      <button class="btn btn-ghost btn-sm" onclick="copyPanelCaption()" id="btn-copy-caption">📋 Copy Caption</button>
     </div>
     <!-- Hashtags tab -->
     <div id="dtab-hashtags" style="display:none;">
       <div class="hashtag-pills" id="dp-hashtags"></div>
-      <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="copyPanelHashtags()" id="btn-copy-hashtags">📋 Copy All Hashtags</button>
+      <div id="dp-ht-edit" style="display:none;margin-top:8px;">
+        <textarea class="form-input" id="dp-edit-hashtags" rows="3" style="width:100%;font-size:12px;" placeholder="#tag1 #tag2 …"></textarea>
+        <button class="btn btn-primary btn-sm" style="margin-top:6px;" onclick="savePanelHashtags()">Save Hashtags</button>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <button class="btn btn-ghost btn-sm" onclick="togglePanelHashtagEdit()">✏️ Edit</button>
+        <button class="btn btn-ghost btn-sm" onclick="copyPanelHashtags()" id="btn-copy-hashtags">📋 Copy All</button>
+      </div>
     </div>
     <!-- Visual tab -->
     <div id="dtab-visual" style="display:none;">
@@ -1705,8 +1734,6 @@ function renderContent() {
              </div>
              <div style="display:flex;gap:6px;margin-top:8px;">
                <button class="btn btn-ghost btn-sm" onclick="copyText(${JSON.stringify(captionText)},this)">📋 Copy</button>
-               <button class="btn btn-ghost btn-sm" id="edit-btn-${postId}" onclick="toggleContentEdit('${postId}')">✏️ Edit</button>
-               <button class="btn btn-primary btn-sm" id="save-btn-${postId}" style="display:none" onclick="saveContentEdit('${esc(S.brand)}','${postId}')">Save</button>
              </div>`
           )}
           ${accordionItem('hashtags-'+idx, '# Hashtags',
@@ -1724,6 +1751,8 @@ function renderContent() {
           ) : ''}
         </div>
         <div style="padding:10px 16px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;">
+          <button class="btn btn-ghost btn-sm" onclick="toggleContentEdit('${postId}')">✏️ Edit</button>
+          <button class="btn btn-primary btn-sm" id="save-btn-${postId}" style="display:none" onclick="saveContentEdit('${esc(S.brand)}','${postId}')">Save</button>
           <button class="btn btn-ghost btn-sm" onclick="copyText(${JSON.stringify(captionText)},this)">📋 Copy</button>
           <button class="btn btn-primary btn-sm" onclick="publishPostNow('${esc(S.brand)}','${esc(postId)}',this)">⚡ Post Now</button>
         </div>
@@ -1756,15 +1785,24 @@ function toggleContentEdit(postId) {
   const edit = document.getElementById('caption-edit-'+postId);
   const htView = document.getElementById('ht-view-'+postId);
   const htEdit = document.getElementById('ht-edit-'+postId);
-  const editBtn = document.getElementById('edit-btn-'+postId);
   const saveBtn = document.getElementById('save-btn-'+postId);
+  if (!edit) return;
   const isEditing = edit.style.display !== 'none';
-  view.style.display = isEditing ? '' : 'none';
+  if (view) view.style.display = isEditing ? '' : 'none';
   edit.style.display = isEditing ? 'none' : '';
   if (htView) htView.style.display = isEditing ? '' : 'none';
   if (htEdit) htEdit.style.display = isEditing ? 'none' : '';
-  editBtn.textContent = isEditing ? '✏️ Edit' : '✏️ Cancel';
-  saveBtn.style.display = isEditing ? 'none' : '';
+  if (saveBtn) saveBtn.style.display = isEditing ? 'none' : '';
+  // Auto-open the caption accordion when entering edit mode
+  if (!isEditing) {
+    const accBody = document.querySelector(`#acc-caption-${postId.replace(/[^a-zA-Z0-9_-]/g, '')}`)
+      || edit.closest('.accordion-body');
+    if (accBody && !accBody.classList.contains('open')) {
+      accBody.classList.add('open');
+      const hd = accBody.previousElementSibling;
+      if (hd) hd.classList.add('open');
+    }
+  }
 }
 
 async function saveContentEdit(brandSlug, postId) {
@@ -2619,6 +2657,13 @@ function openPostDetail(postId) {
     reelEl.innerHTML = `<div class="empty-state"><div class="empty-icon">🎬</div><div class="empty-msg">Not a reel post</div></div>`;
   }
 
+  // Reset edit state when opening a new post
+  document.getElementById('dp-caption-view').style.display = '';
+  document.getElementById('dp-caption-edit').style.display = 'none';
+  document.getElementById('dp-edit-btn').textContent = '✏️ Edit';
+  document.getElementById('dp-save-btn').style.display = 'none';
+  document.getElementById('dp-ht-edit').style.display = 'none';
+
   switchDetailTab('caption', document.querySelector('.detail-tab'));
   document.getElementById('detail-panel').classList.add('open');
   document.getElementById('panel-overlay').style.display = 'block';
@@ -2654,6 +2699,80 @@ function copyPanelCaption() {
 function copyPanelHashtags() {
   const pills = document.querySelectorAll('#dp-hashtags .hashtag-pill');
   copyText(Array.from(pills).map(p=>p.textContent).join(' '), document.getElementById('btn-copy-hashtags'));
+}
+
+function togglePanelEdit() {
+  const view = document.getElementById('dp-caption-view');
+  const edit = document.getElementById('dp-caption-edit');
+  const editBtn = document.getElementById('dp-edit-btn');
+  const saveBtn = document.getElementById('dp-save-btn');
+  const isEditing = edit.style.display !== 'none';
+  if (!isEditing) {
+    // Enter edit mode — populate textareas from current values
+    document.getElementById('dp-edit-hook').value = document.getElementById('dp-hook').textContent;
+    document.getElementById('dp-edit-body').value = document.getElementById('dp-body').textContent;
+    document.getElementById('dp-edit-cta').value = document.getElementById('dp-cta').textContent;
+  }
+  view.style.display = isEditing ? '' : 'none';
+  edit.style.display = isEditing ? 'none' : '';
+  editBtn.textContent = isEditing ? '✏️ Edit' : '✏️ Cancel';
+  saveBtn.style.display = isEditing ? 'none' : '';
+}
+
+async function savePanelEdit() {
+  const postId = S.selectedPost?.post_id || S.selectedPost?.id;
+  if (!postId || !S.brand) return;
+  const hook = document.getElementById('dp-edit-hook').value;
+  const body = document.getElementById('dp-edit-body').value;
+  const cta = document.getElementById('dp-edit-cta').value;
+  const btn = document.getElementById('dp-save-btn');
+  btn.textContent = 'Saving…'; btn.disabled = true;
+  try {
+    const r = await fetch(`/api/brands/${S.brand}/content/${postId}`, {
+      method: 'PUT',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ caption: { hook, body, cta } })
+    });
+    if (!r.ok) throw new Error('Save failed');
+    // Update view immediately
+    document.getElementById('dp-hook').textContent = hook;
+    document.getElementById('dp-body').textContent = body;
+    document.getElementById('dp-cta').textContent = cta;
+    togglePanelEdit(); // exit edit mode
+    btn.textContent = 'Save'; btn.disabled = false;
+    toast('Caption updated', 'success');
+  } catch(e) {
+    btn.textContent = 'Error!'; btn.disabled = false;
+    setTimeout(() => { btn.textContent = 'Save'; }, 1500);
+  }
+}
+
+function togglePanelHashtagEdit() {
+  const el = document.getElementById('dp-ht-edit');
+  const isOpen = el.style.display !== 'none';
+  if (!isOpen) {
+    const pills = document.querySelectorAll('#dp-hashtags .hashtag-pill');
+    document.getElementById('dp-edit-hashtags').value = Array.from(pills).map(p => p.textContent).join(' ');
+  }
+  el.style.display = isOpen ? 'none' : '';
+}
+
+async function savePanelHashtags() {
+  const postId = S.selectedPost?.post_id || S.selectedPost?.id;
+  if (!postId || !S.brand) return;
+  const raw = document.getElementById('dp-edit-hashtags').value;
+  const tags = raw.split(/\s+/).filter(h => h.startsWith('#'));
+  try {
+    const r = await fetch(`/api/brands/${S.brand}/content/${postId}`, {
+      method: 'PUT',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ hashtags: { primary: tags.slice(0,5), secondary: tags.slice(5,10), niche: tags.slice(10), full_set: tags.join(' ') } })
+    });
+    if (!r.ok) throw new Error('Save failed');
+    document.getElementById('dp-hashtags').innerHTML = tags.map(h => `<span class="hashtag-pill">${esc(h)}</span>`).join('');
+    togglePanelHashtagEdit();
+    toast('Hashtags updated', 'success');
+  } catch(e) { toast('Save failed', 'error'); }
 }
 
 // ═══════════════════ SCHEDULE MODAL ═══════════════════
