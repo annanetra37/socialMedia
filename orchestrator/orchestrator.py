@@ -321,12 +321,26 @@ class Orchestrator:
         feed_posts = [p for p in posts if p.get("type") != "story"]
 
         for post in feed_posts:
+            post_type = (post.get("type") or "post").lower()
+
+            # Get available photos for image posts
+            available_photos = None
+            if post_type == "image":
+                available_photos = self.store.get_available_product_indices(self.brand)
+
             # Content (caption, hashtags)
             content = self.content_agent.run({
                 "post_brief": post,
                 "brand_profile": self.brand,
                 "strategy_plan": strategy,
+                "available_photo_indices": available_photos,
             })
+
+            # Track the used photo
+            selected_idx = content.get("selected_product_idx")
+            if selected_idx is not None:
+                self.store.save_used_image(int(selected_idx), post["id"])
+
             self.store.save_content(content, post["id"])
 
             # Visual direction

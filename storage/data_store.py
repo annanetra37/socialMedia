@@ -192,6 +192,37 @@ class DataStore:
     def load_latest_optimization(self) -> Optional[dict]:
         return self.load_latest("optimizations")
 
+    # ── Used product image tracking ───────────────────────────────────────────
+
+    def load_used_images(self) -> list[dict]:
+        """Return list of {product_idx, post_id} records for images already used."""
+        data = self.load("used_images", "tracker.json")
+        if isinstance(data, dict):
+            return data.get("used", [])
+        return []
+
+    def save_used_image(self, product_idx: int, post_id: str) -> None:
+        """Mark a product image as used by a specific post."""
+        records = self.load_used_images()
+        records.append({"product_idx": product_idx, "post_id": post_id})
+        self.save("used_images", "tracker.json", {"used": records})
+
+    def get_available_product_indices(self, brand: dict) -> list[int]:
+        """Return product indices that haven't been used yet.
+        If all are used, reset and return all (round-robin)."""
+        products = brand.get("products", [])
+        if not products:
+            return []
+        all_indices = list(range(len(products)))
+        used = self.load_used_images()
+        used_indices = {r["product_idx"] for r in used}
+        available = [i for i in all_indices if i not in used_indices]
+        if not available:
+            # All photos used — reset tracker and return all
+            self.save("used_images", "tracker.json", {"used": []})
+            available = all_indices
+        return available
+
     # ── Summary ────────────────────────────────────────────────────────────────
 
     def get_session_summary(self) -> dict:

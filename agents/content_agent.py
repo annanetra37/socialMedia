@@ -120,7 +120,9 @@ You adapt tone precisely to each brand's voice."""
         inputs: {
             "post_brief": dict  (single post from campaign plan),
             "brand_profile": dict,
-            "strategy_plan": dict
+            "strategy_plan": dict,
+            "languages": list[str] (optional),
+            "available_photo_indices": list[int] (optional — unused product photo indices)
         }
         returns: content_package dict
         """
@@ -128,14 +130,44 @@ You adapt tone precisely to each brand's voice."""
         brand = inputs["brand_profile"]
         strategy = inputs.get("strategy_plan", {})
         languages = inputs.get("languages") or brand.get("languages") or ["English"]
+        available_photos = inputs.get("available_photo_indices")
 
         post_id = post.get("id", "unknown")
-        self.print_header(f"Generating content for {post_id} — {post.get('type', 'post').upper()} — languages: {', '.join(languages)}")
+        post_type = (post.get("type") or "post").lower()
+        self.print_header(f"Generating content for {post_id} — {post_type.upper()} — languages: {', '.join(languages)}")
 
         if RUN_MODE == "demo":
             return self._demo_output(post, brand)
 
-        product_ctx = _product_image_context(brand)
+        products = brand.get("products", [])
+        slug = _brand_slug(brand.get("name", "brand"))
+
+        # ── For image posts: select a specific unused product photo ──────────
+        photo_instruction = ""
+        selected_idx = None
+        if post_type == "image" and products and available_photos is not None:
+            if available_photos:
+                selected_idx = available_photos[0]
+            else:
+                selected_idx = 0  # fallback if somehow empty
+
+            p = products[selected_idx] if selected_idx < len(products) else products[0]
+            photo_url = f"/api/brands/{slug}/products/{selected_idx}/image"
+            price_str = f"${p.get('price_usd', p.get('price_eur', ''))}" if p.get("price_usd") or p.get("price_eur") else "price unlisted"
+            photo_instruction = f"""
+ASSIGNED PRODUCT PHOTO (you MUST write content specifically about this product):
+  Product: {p.get('name', 'Product')}
+  Price: {price_str}
+  Photo URL: {photo_url}
+  Bestseller: {"Yes" if p.get("bestseller") else "No"}
+
+Write the caption, hook, and CTA to match THIS specific product and its photo.
+The content should feel natural and authentic — as if written while looking at the photo.
+Include the product name in the caption. Reference visual details a viewer would see.
+Add "selected_product_idx": {selected_idx} and "selected_product_photo_url": "{photo_url}" in your JSON output.
+"""
+        product_ctx = _product_image_context(brand) if not photo_instruction else ""
+
         lang_instruction = ""
         if len(languages) == 1:
             lang_instruction = f"\nLANGUAGE: Write ALL content (caption, hook, CTA, hashtags) in {languages[0]}.\n"
@@ -149,6 +181,7 @@ BRAND VOICE: {brand.get('brand_voice', '')}
 BRAND VALUES: {', '.join(brand.get('brand_values', []))}
 AUDIENCE: {json.dumps(brand.get('target_audience', {}), indent=2)}
 {product_ctx}
+{photo_instruction}
 {lang_instruction}
 POST BRIEF:
 {json.dumps(post, indent=2)}
@@ -196,15 +229,23 @@ Output JSON:
   }},
   "alt_text": "<accessibility description>",
   "best_time_to_post": "<HH:MM>",
+  "selected_product_idx": "<index of the product photo used, or null>",
+  "selected_product_photo_url": "<URL of the product photo used, or null>",
   "content_notes": "<any production notes for creator>"
 }}
 ```
-Note: carousel_slides only if type is 'carousel'. reel_script only if type is 'reel'."""
+Note: carousel_slides only if type is 'carousel'. reel_script only if type is 'reel'.
+Note: selected_product_idx and selected_product_photo_url only if a specific product photo was assigned."""
 
         raw = self.call_claude(prompt)
         content = self.extract_json(raw)
         if not content:
             content = {"raw_response": raw, "post_id": post_id}
+
+        # Ensure the selected photo is recorded even if Claude didn't output it
+        if selected_idx is not None:
+            content.setdefault("selected_product_idx", selected_idx)
+            content.setdefault("selected_product_photo_url", f"/api/brands/{slug}/products/{selected_idx}/image")
 
         self.print_result("Caption hook", content.get("caption", {}).get("hook", "")[:60])
         return content
