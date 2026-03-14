@@ -89,19 +89,27 @@ Always follow the output format requested by the user message exactly."""
             "brand_profile": dict,
             "strategy_plan": dict,
             "trend_report": dict,
-            "week_number": int (1-4)
+            "week_number": int (1-4),
+            "target_day": str | None  — e.g. "Monday" to generate for one day only
         }
         returns: campaign_plan dict with posts list
         """
         week = inputs.get("week_number", 1)
-        self.print_header(f"Building Week {week} campaign plan")
+        target_day = inputs.get("target_day")
+        day_label = f" — {target_day} only" if target_day else ""
+        self.print_header(f"Building Week {week}{day_label} campaign plan")
 
         brand = inputs["brand_profile"]
         strategy = inputs["strategy_plan"]
         trends = inputs["trend_report"]
 
         if RUN_MODE == "demo":
-            return self._demo_output(brand, strategy, trends, week)
+            plan = self._demo_output(brand, strategy, trends, week)
+            if target_day:
+                plan["posts"] = [p for p in plan["posts"] if p.get("day", "").lower() == target_day.lower()]
+                plan["weekly_summary"] = self._build_summary(plan["posts"])
+                plan["target_day"] = target_day
+            return plan
 
         # Determine current week's theme
         themes = strategy.get("campaign_themes", [])
@@ -131,7 +139,12 @@ Always follow the output format requested by the user message exactly."""
                 {"format": "User question / poll", "description": "Engage audience with interactive questions", "best_for": "stories"},
             ]
 
-        prompt = f"""Create a detailed 7-day posting schedule for Week {week}.
+        if target_day:
+            schedule_scope = f"a posting schedule for {target_day} of Week {week} (ONE DAY ONLY — do NOT generate posts for other days)"
+        else:
+            schedule_scope = f"a detailed 7-day posting schedule for Week {week}"
+
+        prompt = f"""Create {schedule_scope}.
 
 BRAND: {brand.get('name')}
 WEEK THEME: {json.dumps(current_theme, indent=2)}
@@ -222,25 +235,41 @@ IMPORTANT: Output ONLY the JSON object. No markdown summary, no tables, no expla
                     post_type = (p.get("type") or "post").lower()
                     p["trend_format"] = type_format_map.get(post_type, format_names[0] if format_names else "General")
 
+        # For daily mode: filter to only the target day's posts (safety net
+        # in case the LLM still returned multiple days)
+        if target_day and plan.get("posts"):
+            plan["posts"] = [
+                p for p in plan["posts"]
+                if p.get("day", "").lower() == target_day.lower()
+            ]
+            plan["target_day"] = target_day
+
         # Ensure weekly_summary is always present and consistent with posts
         if plan.get("posts"):
-            posts = plan["posts"]
-            plan["weekly_summary"] = {
-                "total_posts": len(posts),
-                "reels": sum(1 for p in posts if p.get("type") == "reel"),
-                "carousels": sum(1 for p in posts if p.get("type") == "carousel"),
-                "images": sum(1 for p in posts if p.get("type") == "image"),
-                "stories": sum(1 for p in posts if p.get("type") == "story"),
-            }
+            plan["weekly_summary"] = self._build_summary(plan["posts"])
             plan.setdefault("week_number", week)
         else:
             # Last resort: store raw so the user can see what happened
             plan = {"raw_response": raw, "posts": [], "week_number": week,
                     "weekly_summary": {"total_posts": 0, "reels": 0,
                                        "carousels": 0, "images": 0, "stories": 0}}
+            if target_day:
+                plan["target_day"] = target_day
 
         self.print_result("Posts scheduled", len(plan.get("posts", [])))
         return plan
+
+    # ── Helpers ──────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _build_summary(posts: list[dict]) -> dict:
+        return {
+            "total_posts": len(posts),
+            "reels": sum(1 for p in posts if p.get("type") == "reel"),
+            "carousels": sum(1 for p in posts if p.get("type") == "carousel"),
+            "images": sum(1 for p in posts if p.get("type") == "image"),
+            "stories": sum(1 for p in posts if p.get("type") == "story"),
+        }
 
     # ── Tool executors ─────────────────────────────────────────────────────────
 
