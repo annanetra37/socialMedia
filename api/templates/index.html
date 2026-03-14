@@ -170,6 +170,13 @@ tr:hover td { background: rgba(108,99,255,.04); }
 .accordion-body { padding: 12px 16px; display: none; }
 .accordion-body.open { display: block; }
 .caption-pre { background: var(--bg); border-radius: 6px; padding: 10px 12px; font-size: 12px; line-height: 1.7; white-space: pre-wrap; border: 1px solid var(--border); }
+.post-preview { background: var(--bg); border-radius: 8px; border: 1px solid var(--border); padding: 14px; }
+.post-preview-status { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; }
+.post-preview-ready { background: rgba(0,212,170,.15); color: #00d4aa; }
+.post-preview-not-ready { background: rgba(224,92,92,.15); color: #e05c5c; }
+.post-preview-warn { background: rgba(245,166,35,.15); color: #f5a623; font-size: 11px; padding: 6px 10px; border-radius: 6px; margin-top: 8px; }
+.post-preview-meta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; font-size: 11px; color: var(--muted); }
+.post-preview-meta span { background: var(--card-bg); padding: 3px 8px; border-radius: 4px; border: 1px solid var(--border); }
 .hashtag-pills { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px; }
 .hashtag-pill { background: rgba(108,99,255,.15); color: var(--primary); border-radius: 4px; padding: 2px 8px; font-size: 11px; font-family: monospace; }
 
@@ -1823,6 +1830,81 @@ function renderContent() {
           ${hasReel ? accordionItem('reel-'+idx, '🎬 Reel Script',
             `<div class="caption-pre">${esc(typeof reelScript==='string'?reelScript:JSON.stringify(reelScript,null,2))}</div>`
           ) : ''}
+          ${(function(){
+            // ── Post Preview: assemble exactly what Instagram will receive ──
+            const ht = (function(){
+              if (!hashtags) return '';
+              if (typeof hashtags === 'object' && !Array.isArray(hashtags)) return hashtags.full_set || '';
+              if (Array.isArray(hashtags)) return hashtags.join(' ');
+              return String(hashtags);
+            })();
+            const finalCaption = (captionText.trim() + (ht ? '\n\n' + ht : '')).trim();
+            const charCount = finalCaption.length;
+            const postType = type;
+
+            // Resolve media_url with same priority as publish endpoint
+            const mediaUrl = (function(){
+              // 1. visual.media_url (stamped by orchestrator for image posts)
+              if (visual.media_url) return visual.media_url;
+              // 2. visual.image_url
+              if (visual.image_url) return visual.image_url;
+              // 3. DALL-E generated
+              const pImg = visual.primary_image || {};
+              if (pImg.generated_url) return pImg.generated_url;
+              // 4. product photo URL
+              if (pkg.selected_product_photo_url) return pkg.selected_product_photo_url;
+              if (pImg.product_photo_url) return pImg.product_photo_url;
+              // 5. media_url at package level
+              if (pkg.media_url) return pkg.media_url;
+              return '';
+            })();
+
+            const isPublicUrl = mediaUrl && (mediaUrl.startsWith('https://') || mediaUrl.startsWith('http://'));
+            const isRelativeUrl = mediaUrl && !isPublicUrl;
+            const hasMedia = !!mediaUrl;
+            const isReady = !!finalCaption && isPublicUrl;
+
+            let statusHtml, statusClass;
+            if (isReady) {
+              statusClass = 'post-preview-ready';
+              statusHtml = '&#10003; Ready to post';
+            } else {
+              statusClass = 'post-preview-not-ready';
+              const issues = [];
+              if (!finalCaption) issues.push('no caption');
+              if (!hasMedia) issues.push('no media URL');
+              else if (isRelativeUrl) issues.push('relative URL — will fail');
+              statusHtml = '&#10007; Not ready: ' + issues.join(', ');
+            }
+
+            let warnHtml = '';
+            if (isRelativeUrl) {
+              warnHtml = '<div class="post-preview-warn">&#9888; Media URL is a relative path (<code>' + esc(mediaUrl) + '</code>) — Instagram requires a fully public https:// URL. Upload a product photo or generate with DALL-E to get a valid URL.</div>';
+            } else if (!hasMedia) {
+              warnHtml = '<div class="post-preview-warn">&#9888; No media URL found. Instagram needs a public image URL to create the post. Upload a product photo or generate one.</div>';
+            }
+
+            const imgPreview = isPublicUrl
+              ? '<div style="margin:10px 0;"><img src="' + esc(mediaUrl) + '" style="max-width:100%;max-height:240px;border-radius:8px;border:1px solid var(--border);" onerror="this.outerHTML=\'<div style=\\\'padding:12px;color:var(--muted);font-size:12px;background:var(--card-bg);border-radius:6px;border:1px dashed var(--border);\\\'>Image failed to load — URL may be expired or invalid</div>\'" /></div>'
+              : '';
+
+            return accordionItem('preview-'+idx, '&#128064; Post Preview',
+              '<div class="post-preview">'
+              + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'
+              +   '<span class="post-preview-status ' + statusClass + '">' + statusHtml + '</span>'
+              + '</div>'
+              + imgPreview
+              + warnHtml
+              + '<div style="margin-top:10px;"><div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px;">Caption as Instagram will receive it:</div>'
+              + '<div class="caption-pre" style="max-height:200px;overflow:auto;">' + esc(finalCaption) + '</div></div>'
+              + '<div class="post-preview-meta">'
+              +   '<span>Type: <b>' + esc(postType) + '</b></span>'
+              +   '<span>Characters: <b>' + charCount + '</b>' + (charCount > 2200 ? ' <span style="color:#e05c5c">(over 2200 limit!)</span>' : '') + '</span>'
+              +   '<span>Media: <b>' + (isPublicUrl ? 'Public URL' : isRelativeUrl ? 'Relative (invalid)' : 'Missing') + '</b></span>'
+              + '</div>'
+              + '</div>'
+            );
+          })()}
         </div>
         <div style="padding:10px 16px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;">
           <button class="btn btn-ghost btn-sm" onclick="toggleContentEdit('${postId}')">✏️ Edit</button>
