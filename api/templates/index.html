@@ -1792,7 +1792,18 @@ function renderContent() {
     const typeHdrClass = `content-card-${type}`;
 
     const captionText = typeof caption === 'string' ? caption : [caption.hook,caption.body,caption.cta].filter(Boolean).join('\n\n');
-    const hashtags = pkg.hashtags || pkg.tags || [];
+    const hashtagsRaw = pkg.hashtags || pkg.tags || [];
+    // Normalize hashtags to an array of strings
+    const hashtags = (function(h) {
+      if (Array.isArray(h)) return h;
+      if (typeof h === 'object' && h !== null) {
+        // {primary, secondary, niche, full_set} format
+        if (h.full_set) return h.full_set.split(/\s+/).filter(Boolean);
+        return [...(h.primary||[]), ...(h.secondary||[]), ...(h.niche||[])];
+      }
+      if (typeof h === 'string') return h.split(/\s+/).filter(Boolean);
+      return [];
+    })(hashtagsRaw);
     const visual = pkg.visual_brief || pkg.visual || {};
     const reelScript = pkg.reel_script || {};
     const hasReel = type === 'reel' || reelScript.hook_0_3s;
@@ -3406,7 +3417,9 @@ async function publishPostNow(brand, postId, btn) {
       toast('Demo mode — would post to Instagram in live mode', 'info');
     } else {
       btn.textContent = '❌ Failed';
-      toast('Publish error: ' + (d.result?.detail || st), 'error');
+      const errDetail = d.result?.detail;
+      const errMsg = typeof errDetail === 'object' ? JSON.stringify(errDetail) : (errDetail || d.detail || st);
+      toast('Publish error: ' + errMsg, 'error');
     }
   } catch(e) {
     btn.textContent = '❌ Error';
