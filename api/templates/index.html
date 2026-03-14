@@ -1695,7 +1695,11 @@ function renderCampaign() {
         <td style="padding:8px 10px;color:var(--muted);">${p.week||1}</td>
         <td style="padding:8px 10px;font-weight:600;">${esc(p.day||'')}</td>
         <td style="padding:8px 10px;font-family:monospace;">${esc(p.time||'')}</td>
-        <td style="padding:8px 10px;"><span class="badge badge-${type==='reel'?'reel':type==='carousel'?'carousel':type==='story'?'story':'image'}">${type}</span></td>
+        <td style="padding:8px 10px;">
+          <select class="badge badge-${type==='reel'?'reel':type==='carousel'?'carousel':type==='story'?'story':'image'}" onchange="updateCampaignPostType('${pid}',this)" style="cursor:pointer;border:none;font-size:11px;font-weight:600;padding:3px 6px;border-radius:4px;appearance:auto;-webkit-appearance:auto;background:transparent;">
+            ${['reel','carousel','image','story'].map(t => `<option value="${t}" ${t===type?'selected':''}>${t}</option>`).join('')}
+          </select>
+        </td>
         <td style="padding:8px 10px;"><span style="display:inline-block;padding:3px 8px;border-radius:4px;background:${prioBg};color:${prioColor};font-weight:600;font-size:11px;line-height:1.3;text-transform:uppercase;">${prioLevel}</span>${prioIntent ? `<div style="font-size:10px;color:var(--muted);margin-top:2px;">${esc(prioIntent)}</div>` : ''}</td>
         <td style="padding:8px 10px;line-height:1.5;">${brief}</td>
         <td style="padding:8px 10px;color:var(--muted);">${trend}</td>
@@ -1715,6 +1719,27 @@ function renderCampaign() {
     }).join('')}
     </tbody>
   </table>`;
+}
+
+async function updateCampaignPostType(postId, selectEl) {
+  const newType = selectEl.value;
+  try {
+    const r = await fetch(`/api/brands/${S.brand}/campaign-post/${postId}`, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({type: newType})
+    });
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    toast(`Post ${postId} changed to ${newType}`, 'success');
+    // Update local state and re-render to refresh badge colors and summary
+    const posts = S.res.campaign?.posts || [];
+    const post = posts.find(p => (p.id||p.post_id) === postId);
+    if (post) post.type = newType;
+    renderCampaign();
+  } catch(e) {
+    toast('Failed to update: ' + e.message, 'error');
+    renderCampaign(); // re-render to reset the select
+  }
 }
 
 // ═══════════════════ CONTENT ═══════════════════
