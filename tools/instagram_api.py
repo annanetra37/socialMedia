@@ -40,7 +40,9 @@ class InstagramAPI:
         """
         creds = (brand_profile or {}).get("meta_credentials", {})
         self.access_token = creds.get("access_token") or META_ACCESS_TOKEN
-        self.account_id   = creds.get("instagram_business_account_id") or INSTAGRAM_BUSINESS_ACCOUNT_ID
+        self.account_id   = (creds.get("instagram_account_id")
+                             or creds.get("instagram_business_account_id")
+                             or INSTAGRAM_BUSINESS_ACCOUNT_ID)
         self.app_id       = creds.get("app_id", "")
         self.app_secret   = creds.get("app_secret", "")
 
