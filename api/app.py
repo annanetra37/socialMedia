@@ -195,6 +195,8 @@ def _run_cycle_task(job_id: str, brand_slug: str, cycle: str, week: int, day: st
                 "trend_report": trends, "week_number": week,
                 "target_day": day,
             })
+            if day:
+                campaign = orch._merge_day_into_campaign(campaign, week, day)
             store.save_campaign(campaign, week=week)
             results["campaign"] = campaign
             n_posts = campaign.get("weekly_summary", {}).get("total_posts", 0)
