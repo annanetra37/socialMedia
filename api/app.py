@@ -761,9 +761,10 @@ async def get_results(brand_slug: str):
 # otherwise FastAPI matches "content_packages" as a {section} parameter and
 # returns 400 because it's not in the valid set.
 @app.get("/api/results/{brand_slug}/content_packages")
-async def get_content_packages(brand_slug: str):
+async def get_content_packages(brand_slug: str, post_type: str | None = None):
     """Return every content/visual/reel package for a brand (one per post).
 
+    Optional query param: ?post_type=reel|image|carousel to filter.
     Merges scheduling metadata from ALL campaign plans (not just the latest)
     into each content package so the frontend has everything it needs.
     """
@@ -791,8 +792,15 @@ async def get_content_packages(brand_slug: str):
         content = store.load("content", fname) or {}
         meta = post_meta.get(post_id, {})
 
+        # Apply post_type filter if requested
+        if post_type:
+            resolved_type = meta.get("type") or content.get("post_type", "image")
+            if resolved_type != post_type:
+                continue
+
         # Extract caption object — the content agent nests it under "caption"
         caption_data = content.get("caption", {})
+        visual_data = store.load("visuals", fname) or {}
 
         pkg = {
             # Scheduling metadata: prefer campaign plan, fall back to content data
@@ -812,7 +820,8 @@ async def get_content_packages(brand_slug: str):
             "alt_text":     content.get("alt_text", ""),
             "content_notes": content.get("content_notes", ""),
             "selected_product_photo_url": content.get("selected_product_photo_url", ""),
-            "visual":       store.load("visuals", fname),
+            "visual":       visual_data,
+            "media_url":    visual_data.get("media_url", "") if visual_data else "",
             "reel":         store.load("reels", fname),
         }
         packages.append(pkg)
@@ -897,31 +906,22 @@ async def publish_post_now(brand_slug: str, post_id: str):
     if ht:
         caption = caption.strip() + "\n\n" + ht
 
-    # Try to get a media URL — prefer public_url from product_images DB
+    # Get media URL from visuals — orchestrator stamps media_url directly
+    # for image posts with product photos, so this should just work.
     visual = store.load("visuals", f"{post_id}.json") or {}
-    media_url = ""
+    media_url = visual.get("media_url") or ""
 
-    # 1. Check for DALL-E generated URL first
-    media_url = (
-        visual.get("image_url")
-        or visual.get("media_url")
-        or visual.get("primary_image", {}).get("generated_url", "")
-    )
+    # Fallback: DALL-E generated URL
+    if not media_url:
+        media_url = visual.get("primary_image", {}).get("generated_url", "")
 
-    # 2. Fall back to product photo public_url from DB
+    # Fallback: look up public_url from product_images DB
     if not media_url:
         import os
         selected_idx = content.get("selected_product_idx")
         if selected_idx is not None and os.getenv("DATABASE_URL"):
             from storage.database import get_product_image_public_url
             media_url = get_product_image_public_url(brand_slug, int(selected_idx)) or ""
-
-    # 3. Last resort: visual's product_photo_url (may be relative — won't work with IG API)
-    if not media_url:
-        media_url = (
-            visual.get("primary_image", {}).get("product_photo_url", "")
-            or content.get("selected_product_photo_url", "")
-        )
 
     api = InstagramAPI(brand)
     result = api.schedule_post({

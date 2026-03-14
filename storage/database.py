@@ -62,6 +62,7 @@ def init_db() -> None:
             brand_slug  TEXT NOT NULL,
             data_type   TEXT NOT NULL,
             period_key  TEXT NOT NULL DEFAULT '',
+            post_type   TEXT DEFAULT NULL,
             data        JSONB NOT NULL,
             created_at  TIMESTAMPTZ DEFAULT NOW(),
             updated_at  TIMESTAMPTZ DEFAULT NOW(),
@@ -72,6 +73,7 @@ def init_db() -> None:
         """,
         "CREATE INDEX IF NOT EXISTS idx_bd_lookup ON brand_data (brand_slug, data_type)",
         "CREATE INDEX IF NOT EXISTS idx_bd_period ON brand_data (brand_slug, data_type, period_key)",
+        "CREATE INDEX IF NOT EXISTS idx_bd_posttype ON brand_data (brand_slug, post_type) WHERE post_type IS NOT NULL",
         """
         CREATE TABLE IF NOT EXISTS product_images (
             brand_slug   TEXT NOT NULL,
@@ -107,7 +109,29 @@ def init_db() -> None:
                     ) THEN
                         ALTER TABLE product_images ADD COLUMN public_url TEXT DEFAULT NULL;
                     END IF;
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name='brand_data' AND column_name='post_type'
+                    ) THEN
+                        ALTER TABLE brand_data ADD COLUMN post_type TEXT DEFAULT NULL;
+                        CREATE INDEX IF NOT EXISTS idx_bd_posttype
+                            ON brand_data (brand_slug, post_type) WHERE post_type IS NOT NULL;
+                    END IF;
                 END $$;
+            """)
+            # Backfill post_type from JSON data for existing rows
+            cur.execute("""
+                UPDATE brand_data
+                SET post_type = data->>'post_type'
+                WHERE post_type IS NULL
+                  AND data_type IN ('content', 'visuals')
+                  AND data->>'post_type' IS NOT NULL
+            """)
+            # Reels data_type is always post_type='reel'
+            cur.execute("""
+                UPDATE brand_data
+                SET post_type = 'reel'
+                WHERE post_type IS NULL AND data_type = 'reels'
             """)
 
 
@@ -182,17 +206,18 @@ def _unpack(row_data: dict):
     return row_data
 
 
-def upsert_data(brand_slug: str, data_type: str, period_key: str, data) -> None:
+def upsert_data(brand_slug: str, data_type: str, period_key: str, data,
+                post_type: str | None = None) -> None:
     with _conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO brand_data (brand_slug, data_type, period_key, data, updated_at)
-                VALUES (%s, %s, %s, %s::jsonb, NOW())
+                INSERT INTO brand_data (brand_slug, data_type, period_key, post_type, data, updated_at)
+                VALUES (%s, %s, %s, %s, %s::jsonb, NOW())
                 ON CONFLICT (brand_slug, data_type, period_key) DO UPDATE
-                    SET data = EXCLUDED.data, updated_at = NOW()
+                    SET data = EXCLUDED.data, post_type = EXCLUDED.post_type, updated_at = NOW()
                 """,
-                (brand_slug, data_type, period_key, _pack(data)),
+                (brand_slug, data_type, period_key, post_type, _pack(data)),
             )
 
 
@@ -200,11 +225,17 @@ def get_data(brand_slug: str, data_type: str, period_key: str):
     with _conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
-                "SELECT data FROM brand_data WHERE brand_slug=%s AND data_type=%s AND period_key=%s",
+                "SELECT data, post_type FROM brand_data WHERE brand_slug=%s AND data_type=%s AND period_key=%s",
                 (brand_slug, data_type, period_key),
             )
             row = cur.fetchone()
-            return _unpack(dict(row["data"])) if row else None
+            if not row:
+                return None
+            result = _unpack(dict(row["data"]))
+            # Inject post_type into the result if it's a dict
+            if isinstance(result, dict) and row["post_type"]:
+                result.setdefault("post_type", row["post_type"])
+            return result
 
 
 def get_latest_data(brand_slug: str, data_type: str):
@@ -233,19 +264,33 @@ def list_period_keys(brand_slug: str, data_type: str) -> list[str]:
             return [r[0] for r in cur.fetchall()]
 
 
-def get_all_by_type(brand_slug: str, data_type: str) -> list[dict]:
-    """Return all rows of a given type as a list of dicts."""
+def get_all_by_type(brand_slug: str, data_type: str, post_type: str | None = None) -> list[dict]:
+    """Return all rows of a given type as a list of dicts.
+    Optionally filter by post_type (image, reel, carousel, story)."""
     with _conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute(
-                """
-                SELECT period_key, data FROM brand_data
-                WHERE brand_slug = %s AND data_type = %s
-                ORDER BY period_key
-                """,
-                (brand_slug, data_type),
-            )
-            return [{"period_key": r["period_key"], **_unpack(dict(r["data"]))} for r in cur.fetchall()]
+            if post_type:
+                cur.execute(
+                    """
+                    SELECT period_key, post_type, data FROM brand_data
+                    WHERE brand_slug = %s AND data_type = %s AND post_type = %s
+                    ORDER BY period_key
+                    """,
+                    (brand_slug, data_type, post_type),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT period_key, post_type, data FROM brand_data
+                    WHERE brand_slug = %s AND data_type = %s
+                    ORDER BY period_key
+                    """,
+                    (brand_slug, data_type),
+                )
+            return [
+                {"period_key": r["period_key"], "post_type": r["post_type"], **_unpack(dict(r["data"]))}
+                for r in cur.fetchall()
+            ]
 
 
 # ════════════════════════════════════════════════════════════════════════════
