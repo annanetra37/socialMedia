@@ -154,16 +154,35 @@ You adapt tone precisely to each brand's voice."""
             p = products[selected_idx] if selected_idx < len(products) else products[0]
             photo_url = f"/api/brands/{slug}/products/{selected_idx}/image"
             price_str = f"${p.get('price_usd', p.get('price_eur', ''))}" if p.get("price_usd") or p.get("price_eur") else "price unlisted"
+            # Extract the campaign planner's strategic direction for this post
+            brief = post.get("content_brief", "")
+            hook = post.get("hook", "")
+            cta = post.get("cta", "")
+            theme = post.get("theme", "")
+            trend_fmt = post.get("trend_format", "")
+
             photo_instruction = f"""
-ASSIGNED PRODUCT PHOTO (you MUST write content specifically about this product):
+ASSIGNED PRODUCT PHOTO (feature this product as the visual for this post):
   Product: {p.get('name', 'Product')}
   Price: {price_str}
   Photo URL: {photo_url}
   Bestseller: {"Yes" if p.get("bestseller") else "No"}
 
-Write the caption, hook, and CTA to match THIS specific product and its photo.
-The content should feel natural and authentic — as if written while looking at the photo.
-Include the product name in the caption. Reference visual details a viewer would see.
+CAMPAIGN PLANNER DIRECTION (you MUST follow this strategic angle):
+  Brief: {brief}
+  Suggested hook: {hook}
+  Suggested CTA: {cta}
+  Theme: {theme}
+  Trend format: {trend_fmt}
+
+IMPORTANT: Merge the campaign strategy with the product photo. The post should:
+1. Follow the campaign planner's theme, hook style, and CTA direction above
+2. Feature the assigned product ({p.get('name', 'Product')}) as the visual subject
+3. Weave the product naturally into the strategic brief — don't just describe the photo,
+   tell the story the campaign planner intended, WITH this product as the hero visual
+4. Keep the trend format ({trend_fmt}) and emotional tone from the brief
+5. Include the product name in the caption naturally (not forced)
+
 Add "selected_product_idx": {selected_idx} and "selected_product_photo_url": "{photo_url}" in your JSON output.
 """
         product_ctx = _product_image_context(brand) if not photo_instruction else ""
