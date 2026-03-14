@@ -1545,10 +1545,14 @@ function selectWeek(w, btn) {
 async function loadCalendar(week) {
   if (!S.brand) return;
   try {
-    if (!S.res.campaign) {
-      const r = await fetch(`/api/results/${S.brand}`);
-      if (r.ok) S.res = await r.json();
-    }
+    const fetches = [];
+    if (!S.res.campaign) fetches.push(fetch(`/api/results/${S.brand}`).then(r => r.ok ? r.json() : null));
+    if (!S.pkgs.length) fetches.push(fetch(`/api/results/${S.brand}/content_packages`).then(r => r.ok ? r.json() : null));
+    const results = await Promise.all(fetches);
+    let idx = 0;
+    if (!S.res.campaign && results[idx]) { S.res = results[idx]; idx++; }
+    else if (!S.res.campaign) idx++;
+    if (!S.pkgs.length && results[idx]) { const pd = results[idx]; S.pkgs = pd.packages || pd.content_packages || []; }
     renderCalendar(week);
   } catch(e) {
     document.getElementById('cal-grid').innerHTML = emptyState('📅','No campaign data','Run a cycle first');
@@ -2713,8 +2717,18 @@ function openPostDetail(postId) {
 
   const p = S.selectedPost;
   const merged = Object.assign({}, p, pkg||{});
-  const type = (merged.type||'post').toLowerCase();
-  const caption = merged.caption || merged.content || {};
+  const type = (merged.type||merged.post_type||'post').toLowerCase();
+
+  // Caption: content package uses {hook,body,cta}, campaign uses flat fields
+  let caption = merged.caption || merged.content || {};
+  if (typeof caption === 'object' && !caption.hook && !caption.body) {
+    // No content package caption — fall back to campaign planner fields
+    caption = {
+      hook: merged.hook || '',
+      body: merged.content_brief || merged.caption_brief || '',
+      cta: merged.cta || '',
+    };
+  }
 
   // Header
   document.getElementById('dpanel-type-badge').textContent = type.toUpperCase();
@@ -2733,39 +2747,62 @@ function openPostDetail(postId) {
     document.getElementById('dp-cta').textContent = caption.cta || '';
   }
 
-  // Hashtags
-  const tags = merged.hashtags || merged.tags || [];
-  document.getElementById('dp-hashtags').innerHTML = Array.isArray(tags)
+  // Hashtags: content package uses {primary,secondary,niche,full_set}, campaign uses array
+  let tags = merged.hashtags || merged.hashtag_cluster || merged.tags || [];
+  if (typeof tags === 'object' && !Array.isArray(tags)) {
+    // Content package format — flatten to array
+    tags = [...(tags.primary||[]), ...(tags.secondary||[]), ...(tags.niche||[])];
+    if (!tags.length && tags.full_set) tags = tags.full_set.split(/\s+/);
+  }
+  document.getElementById('dp-hashtags').innerHTML = Array.isArray(tags) && tags.length
     ? tags.map(h=>`<span class="hashtag-pill">${esc(h)}</span>`).join('')
-    : `<span class="hashtag-pill">${esc(tags)}</span>`;
+    : `<span style="color:var(--muted);font-size:12px;">No hashtags yet — generate content first</span>`;
 
   // Visual
-  const visual = merged.visual_brief || merged.visual || {};
-  document.getElementById('dp-img-prompt').textContent = typeof visual==='string' ? visual : (visual.image_prompt||visual.prompt||'No image prompt');
-  document.getElementById('dp-photo-brief').textContent = typeof visual==='string' ? '' : (visual.photography_brief||visual.brief||'');
+  const visual = merged.visual || merged.visual_brief || {};
+  const primaryImg = typeof visual === 'object' ? (visual.primary_image || {}) : {};
+  const imgPrompt = primaryImg.ai_generation_prompt || primaryImg.description || (typeof visual==='string' ? visual : (visual.image_prompt||visual.prompt||''));
+  const photoBrief = primaryImg.photography_brief || (typeof visual==='string' ? '' : (visual.photography_brief||visual.brief||''));
+  const photoUrl = merged.selected_product_photo_url || primaryImg.product_photo_url || null;
+  document.getElementById('dp-img-prompt').textContent = imgPrompt || merged.visual_notes || 'No image prompt — generate content first';
+  document.getElementById('dp-photo-brief').textContent = photoBrief;
   const palette = document.getElementById('dp-palette');
-  const colors = typeof visual === 'object' ? (visual.color_palette||[]) : [];
-  palette.innerHTML = Array.isArray(colors)
-    ? colors.map(c => `<span style="background:${esc(c)};width:24px;height:24px;border-radius:4px;display:inline-block;border:1px solid var(--border)" title="${esc(c)}"></span>`).join('')
-    : `<span style="color:var(--muted);font-size:12px;">${esc(colors)}</span>`;
+  let colorsObj = typeof visual === 'object' ? (visual.colour_palette||visual.color_palette||{}) : {};
+  if (typeof colorsObj === 'object' && !Array.isArray(colorsObj)) {
+    const hexVals = Object.values(colorsObj).filter(v => typeof v === 'string' && v.startsWith('#'));
+    palette.innerHTML = hexVals.length
+      ? hexVals.map(c => `<span style="background:${esc(c)};width:24px;height:24px;border-radius:4px;display:inline-block;border:1px solid var(--border)" title="${esc(c)}"></span>`).join('')
+      : `<span style="color:var(--muted);font-size:12px;">No palette</span>`;
+  } else if (Array.isArray(colorsObj)) {
+    palette.innerHTML = colorsObj.map(c => `<span style="background:${esc(c)};width:24px;height:24px;border-radius:4px;display:inline-block;border:1px solid var(--border)" title="${esc(c)}"></span>`).join('');
+  } else {
+    palette.innerHTML = `<span style="color:var(--muted);font-size:12px;">No palette</span>`;
+  }
 
   // Reel
   const reelEl = document.getElementById('dp-reel-content');
-  const reel = merged.reel_script || {};
-  if (type === 'reel' || reel.hook_0_3s || reel.scenes) {
+  const reel = merged.reel_script || merged.reel || {};
+  if (type === 'reel' || reel.hook_0_3s || reel.hook_visual || reel.scenes) {
     const scenes = reel.scenes || [];
+    const hookText = reel.hook_0_3s || reel.hook_visual || reel.hook || merged.hook || '';
+    const hookOverlay = reel.hook_text_overlay || '';
     reelEl.innerHTML = `
       <div class="detail-section">
         <div class="detail-section-label">Hook (0–3s)</div>
-        <div class="detail-text">${esc(reel.hook_0_3s||reel.hook||'')}</div>
+        <div class="detail-text">${esc(hookText)}</div>
+        ${hookOverlay ? `<div class="detail-text" style="color:var(--muted);font-size:11px;margin-top:2px;">Text overlay: ${esc(hookOverlay)}</div>` : ''}
       </div>
       ${scenes.length ? `<div class="detail-section">
         <div class="detail-section-label">Scenes</div>
         ${scenes.map((sc, i) => `
           <div class="scene-item">
             <span class="scene-num">${i+1}</span>
-            <div class="scene-desc">${esc(typeof sc==='string'?sc:sc.description||sc.text||JSON.stringify(sc))}</div>
+            <div class="scene-desc">${esc(typeof sc==='string'?sc:sc.visual||sc.description||sc.text||JSON.stringify(sc))}${sc.text_overlay ? ' <span style="color:var(--accent);">['+esc(sc.text_overlay)+']</span>' : ''}</div>
           </div>`).join('')}
+      </div>` : ''}
+      ${reel.voiceover ? `<div class="detail-section">
+        <div class="detail-section-label">Voiceover</div>
+        <div class="detail-text">${esc(reel.voiceover)}</div>
       </div>` : ''}
       <div class="detail-section">
         <div class="detail-section-label">Closing CTA</div>
