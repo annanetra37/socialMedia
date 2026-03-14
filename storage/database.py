@@ -316,6 +316,28 @@ def mark_image_used(brand_slug: str, product_idx: int, post_id: str) -> None:
             )
 
 
+def delete_product_image(brand_slug: str, product_idx: int) -> bool:
+    """Delete a single product image. Returns True if a row was deleted."""
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM product_images WHERE brand_slug = %s AND product_idx = %s",
+                (brand_slug, product_idx),
+            )
+            return cur.rowcount > 0
+
+
+def delete_all_product_images(brand_slug: str) -> int:
+    """Delete all product images for a brand. Returns number of rows deleted."""
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM product_images WHERE brand_slug = %s",
+                (brand_slug,),
+            )
+            return cur.rowcount
+
+
 def reset_images_used(brand_slug: str) -> None:
     """Reset all images for a brand back to unused (round-robin reset)."""
     with _conn() as conn:

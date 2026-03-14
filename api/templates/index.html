@@ -3368,6 +3368,10 @@ function removeProduct(idx) {
   const row = document.getElementById(`prod-row-${idx}`);
   if (row) row.remove();
   delete _productImages[idx];
+  // Delete from server DB if editing an existing brand
+  if (_bfEditSlug) {
+    fetch(`/api/brands/${_bfEditSlug}/products/${idx}/image`, { method: 'DELETE' }).catch(() => {});
+  }
 }
 function onProductImageSelected(idx, input) {
   const file = input.files[0];
