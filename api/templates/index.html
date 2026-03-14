@@ -681,6 +681,19 @@ tr:hover td { background: rgba(108,99,255,.04); }
         <option value="4">Week 4</option>
       </select>
     </div>
+    <div class="form-group" style="margin:0;min-width:140px;">
+      <label class="form-label">Day <span style="font-size:11px;color:var(--muted)">(optional)</span></label>
+      <select class="form-select" id="run-day-select">
+        <option value="">All week</option>
+        <option value="Monday">Monday</option>
+        <option value="Tuesday">Tuesday</option>
+        <option value="Wednesday">Wednesday</option>
+        <option value="Thursday">Thursday</option>
+        <option value="Friday">Friday</option>
+        <option value="Saturday">Saturday</option>
+        <option value="Sunday">Sunday</option>
+      </select>
+    </div>
     <button class="btn btn-primary btn-lg" id="run-btn" onclick="startRunCycle()" style="align-self:flex-end;">▶ Run Cycle</button>
   </div>
 
@@ -2330,6 +2343,7 @@ async function startRunCycle() {
   const brand = document.getElementById('run-brand-select').value;
   const cycle = document.getElementById('run-cycle-select').value;
   const week = document.getElementById('run-week-select').value;
+  const day = document.getElementById('run-day-select').value || null;
 
   if (!brand) { toast('Select a brand first', 'error'); return; }
 
@@ -2352,7 +2366,7 @@ async function startRunCycle() {
     const r = await fetch('/api/cycle/run', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({brand_slug: brand, cycle, week: parseInt(week)})
+      body: JSON.stringify({brand_slug: brand, cycle, week: parseInt(week), day})
     });
     const data = await r.json();
     const jobId = data.job_id;

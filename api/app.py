@@ -95,6 +95,7 @@ class CycleRequest(BaseModel):
     brand_slug: Optional[str] = "luna_silver"
     cycle: str = "full"          # full | monitoring | engagement | content | growth | content_single
     week: int = 1                # 1-4
+    day: Optional[str] = None    # e.g. "Monday" — when set, campaign generates for one day only
     post_id: Optional[str] = None  # for content_single — generate content for one post
     languages: Optional[list[str]] = None  # override languages for content generation
 
@@ -148,7 +149,7 @@ def _append_log(job_id: str, message: str) -> None:
     _glog(message)
 
 
-def _run_cycle_task(job_id: str, brand_slug: str, cycle: str, week: int, post_id: str | None = None, languages: list[str] | None = None) -> None:
+def _run_cycle_task(job_id: str, brand_slug: str, cycle: str, week: int, day: str | None = None, post_id: str | None = None, languages: list[str] | None = None) -> None:
     """Background thread: runs the full orchestrator cycle."""
     from orchestrator.orchestrator import Orchestrator
     from rich.console import Console
@@ -187,10 +188,12 @@ def _run_cycle_task(job_id: str, brand_slug: str, cycle: str, week: int, post_id
             results["strategy"] = strategy
             _append_log(job_id, f"✓ Strategy complete — {len(strategy.get('campaign_themes', []))} themes")
 
-            _append_log(job_id, f"Phase 3/8: Campaign Planner (week {week})…")
+            day_label = f" ({day} only)" if day else ""
+            _append_log(job_id, f"Phase 3/8: Campaign Planner (week {week}{day_label})…")
             campaign = orch.campaign_agent.run({
                 "brand_profile": brand, "strategy_plan": strategy,
                 "trend_report": trends, "week_number": week,
+                "target_day": day,
             })
             store.save_campaign(campaign, week=week)
             results["campaign"] = campaign
@@ -345,11 +348,12 @@ def _run_cycle_task(job_id: str, brand_slug: str, cycle: str, week: int, post_id
             _append_log(job_id, f"✓ Trends complete — {n} topics found")
 
         elif cycle == "campaign":
-            _append_log(job_id, f"Phase 1/1: Campaign Planner — Week {week}…")
+            day_label = f" — {day} only" if day else ""
+            _append_log(job_id, f"Phase 1/1: Campaign Planner — Week {week}{day_label}…")
             _append_log(job_id, "Loading strategy + trends (auto-generates if missing)…")
-            results = orch.run_campaign_block(week=week)
+            results = orch.run_campaign_block(week=week, target_day=day)
             posts = results.get("campaign", {}).get("posts", [])
-            _append_log(job_id, f"✓ Campaign complete — {len(posts)} posts planned for Week {week}")
+            _append_log(job_id, f"✓ Campaign complete — {len(posts)} posts planned for Week {week}{day_label}")
 
         elif cycle == "analytics":
             _append_log(job_id, "Phase 1/1: Analytics Agent…")
@@ -674,9 +678,10 @@ async def run_cycle(req: CycleRequest, background_tasks: BackgroundTasks):
         "usage": {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0},
         "model": "",
     }
-    _glog(f"Cycle queued: brand='{req.brand_slug}' cycle='{req.cycle}' week={req.week} job={job_id}")
+    day_info = f" day='{req.day}'" if req.day else ""
+    _glog(f"Cycle queued: brand='{req.brand_slug}' cycle='{req.cycle}' week={req.week}{day_info} job={job_id}")
     background_tasks.add_task(
-        _run_cycle_task, job_id, req.brand_slug, req.cycle, req.week, req.post_id, req.languages
+        _run_cycle_task, job_id, req.brand_slug, req.cycle, req.week, req.day, req.post_id, req.languages
     )
     return {"job_id": job_id, "status": "queued"}
 

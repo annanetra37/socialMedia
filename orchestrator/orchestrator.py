@@ -247,7 +247,7 @@ class Orchestrator:
         self.store.save_trend_report(trends)
         return {"trends": trends}
 
-    def run_campaign_block(self, week: int = 1) -> dict:
+    def run_campaign_block(self, week: int = 1, target_day: str | None = None) -> dict:
         """Run just the Campaign Planner Agent (auto-generates prerequisites if missing)."""
         self._print_block_header("3", "CAMPAIGN PLANNER", "📅")
         month = datetime.now().strftime("%B %Y")
@@ -263,7 +263,7 @@ class Orchestrator:
             self.console.print("  [dim]No strategy found — generating strategy first…[/dim]")
             strategy = self._run_strategy(month, trends)
             self.store.save_strategy(strategy)
-        campaign = self._run_campaign(strategy, trends, week)
+        campaign = self._run_campaign(strategy, trends, week, target_day=target_day)
         self.store.save_campaign(campaign, week=week)
         return {"campaign": campaign, "strategy": strategy, "trends": trends}
 
@@ -303,12 +303,13 @@ class Orchestrator:
             "strategy_plan": strategy or {},
         })
 
-    def _run_campaign(self, strategy: dict, trends: dict, week: int) -> dict:
+    def _run_campaign(self, strategy: dict, trends: dict, week: int, target_day: str | None = None) -> dict:
         return self.campaign_agent.run({
             "brand_profile": self.brand,
             "strategy_plan": strategy,
             "trend_report": trends,
             "week_number": week,
+            "target_day": target_day,
         })
 
     def _run_content_block(
