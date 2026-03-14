@@ -761,9 +761,10 @@ async def get_results(brand_slug: str):
 # otherwise FastAPI matches "content_packages" as a {section} parameter and
 # returns 400 because it's not in the valid set.
 @app.get("/api/results/{brand_slug}/content_packages")
-async def get_content_packages(brand_slug: str):
+async def get_content_packages(brand_slug: str, post_type: str | None = None):
     """Return every content/visual/reel package for a brand (one per post).
 
+    Optional query param: ?post_type=reel|image|carousel to filter.
     Merges scheduling metadata from ALL campaign plans (not just the latest)
     into each content package so the frontend has everything it needs.
     """
@@ -790,6 +791,12 @@ async def get_content_packages(brand_slug: str):
         post_id = fname.removesuffix(".json")
         content = store.load("content", fname) or {}
         meta = post_meta.get(post_id, {})
+
+        # Apply post_type filter if requested
+        if post_type:
+            resolved_type = meta.get("type") or content.get("post_type", "image")
+            if resolved_type != post_type:
+                continue
 
         # Extract caption object — the content agent nests it under "caption"
         caption_data = content.get("caption", {})

@@ -75,10 +75,12 @@ class DataStore:
 
     # ── Generic save/load (used directly by orchestrator/agents) ─────────────
 
-    def save(self, category: str, filename: str, data: Any) -> Optional[Path]:
+    def save(self, category: str, filename: str, data: Any,
+             post_type: str | None = None) -> Optional[Path]:
         period_key = filename.removesuffix(".json")
         if _USE_DB:
-            _db.upsert_data(self.brand_slug, category, period_key, data)
+            _db.upsert_data(self.brand_slug, category, period_key, data,
+                            post_type=post_type)
             return None
         return self._fs_save(category, filename, data)
 
@@ -100,14 +102,17 @@ class DataStore:
             return _db.get_latest_data(self.brand_slug, category)
         return self._fs_load_latest(category)
 
-    def load_all(self, category: str) -> list[Any]:
-        """Return data from every file/row in a category."""
+    def load_all(self, category: str, post_type: str | None = None) -> list[Any]:
+        """Return data from every file/row in a category.
+        Optionally filter by post_type (image, reel, carousel, story)."""
         if _USE_DB:
-            return [row for row in _db.get_all_by_type(self.brand_slug, category)]
+            return [row for row in _db.get_all_by_type(self.brand_slug, category, post_type=post_type)]
         results = []
         for fname in self._fs_list(category):
             data = self._fs_load(category, fname)
             if data:
+                if post_type and isinstance(data, dict) and data.get("post_type") != post_type:
+                    continue
                 results.append(data)
         return results
 
@@ -156,19 +161,21 @@ class DataStore:
         return self.load("campaigns", f"{month}_w{week:02d}.json")
 
     def save_content(self, content: dict, post_id: str) -> Optional[Path]:
-        return self.save("content", f"{post_id}.json", content)
+        pt = content.get("post_type")
+        return self.save("content", f"{post_id}.json", content, post_type=pt)
 
     def load_content(self, post_id: str) -> Optional[dict]:
         return self.load("content", f"{post_id}.json")
 
     def save_visual(self, visual: dict, post_id: str) -> Optional[Path]:
-        return self.save("visuals", f"{post_id}.json", visual)
+        pt = visual.get("post_type")
+        return self.save("visuals", f"{post_id}.json", visual, post_type=pt)
 
     def load_visual(self, post_id: str) -> Optional[dict]:
         return self.load("visuals", f"{post_id}.json")
 
     def save_reel(self, reel: dict, post_id: str) -> Optional[Path]:
-        return self.save("reels", f"{post_id}.json", reel)
+        return self.save("reels", f"{post_id}.json", reel, post_type="reel")
 
     def save_engagement(self, responses: dict, date: Optional[str] = None) -> Optional[Path]:
         date = date or datetime.now().strftime("%Y-%m-%d")
