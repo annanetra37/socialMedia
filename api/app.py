@@ -605,6 +605,42 @@ async def serve_product_image(brand_slug: str, product_idx: int):
     raise HTTPException(status_code=404, detail="No image found")
 
 
+@app.delete("/api/brands/{brand_slug}/products/{product_idx}/image")
+async def delete_product_image(brand_slug: str, product_idx: int):
+    """Delete a single product image from DB and filesystem."""
+    import os
+    deleted = False
+    if os.getenv("DATABASE_URL"):
+        from storage.database import delete_product_image as db_delete_img
+        deleted = db_delete_img(brand_slug, product_idx)
+    # Also remove from filesystem
+    img_dir = STORAGE_DIR / brand_slug / "product_images"
+    for ext in (".jpg", ".png", ".webp"):
+        p = img_dir / f"{product_idx}{ext}"
+        if p.exists():
+            p.unlink()
+            deleted = True
+    if not deleted:
+        raise HTTPException(status_code=404, detail="No image found")
+    return {"deleted": True, "brand_slug": brand_slug, "product_idx": product_idx}
+
+
+@app.delete("/api/brands/{brand_slug}/products/images")
+async def delete_all_product_images(brand_slug: str):
+    """Delete all product images for a brand."""
+    import os
+    count = 0
+    if os.getenv("DATABASE_URL"):
+        from storage.database import delete_all_product_images as db_delete_all
+        count = db_delete_all(brand_slug)
+    # Also remove from filesystem
+    img_dir = STORAGE_DIR / brand_slug / "product_images"
+    if img_dir.exists():
+        import shutil
+        shutil.rmtree(img_dir)
+    return {"deleted": True, "brand_slug": brand_slug, "count": count}
+
+
 @app.get("/api/brands/{brand_slug}/products/images")
 async def list_product_images(brand_slug: str):
     """List all product images with their public URLs and usage status."""
