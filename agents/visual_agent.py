@@ -147,7 +147,7 @@ text placement, and how the visual looks as a thumbnail at 50x50px."""
             for i, p in enumerate(products):
                 price = f"${p['price_usd']}" if p.get("price_usd") else "unlisted"
                 product_lines.append(
-                    f"  [{i}] {p.get('name','Product')} ({price}) → /api/brands/{slug}/products/{i}/image"
+                    f"  [{i}] {p.get('name','Product')} ({price}) → /api/brands/{slug}/products/{i}/image.jpg"
                 )
             product_photo_block = (
                 "UPLOADED PRODUCT PHOTOS (use these as primary_image.product_photo_url):\n"

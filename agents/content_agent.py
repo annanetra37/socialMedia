@@ -34,7 +34,7 @@ def _product_image_context(brand: dict) -> str:
     for i, p in enumerate(products):
         price = f"${p['price_usd']}" if p.get("price_usd") else "price unlisted"
         lines.append(f"  [{i}] {p.get('name', 'Product')} — {price}")
-        lines.append(f"       photo URL: /api/brands/{slug}/products/{i}/image")
+        lines.append(f"       photo URL: /api/brands/{slug}/products/{i}/image.jpg")
     return "\n".join(lines)
 
 
@@ -154,7 +154,7 @@ You adapt tone precisely to each brand's voice."""
 
             p = products[selected_idx] if selected_idx < len(products) else products[0]
             # Prefer public URL from DB (works with Instagram API), fall back to relative
-            photo_url = photo_public_urls.get(selected_idx, f"/api/brands/{slug}/products/{selected_idx}/image")
+            photo_url = photo_public_urls.get(selected_idx, f"/api/brands/{slug}/products/{selected_idx}/image.jpg")
             price_str = f"${p.get('price_usd', p.get('price_eur', ''))}" if p.get("price_usd") or p.get("price_eur") else "price unlisted"
             # Extract the campaign planner's strategic direction for this post
             brief = post.get("content_brief", "")
@@ -266,7 +266,7 @@ Note: selected_product_idx and selected_product_photo_url only if a specific pro
         # Ensure the selected photo is recorded even if Claude didn't output it
         if selected_idx is not None:
             content.setdefault("selected_product_idx", selected_idx)
-            content.setdefault("selected_product_photo_url", f"/api/brands/{slug}/products/{selected_idx}/image")
+            content.setdefault("selected_product_photo_url", f"/api/brands/{slug}/products/{selected_idx}/image.jpg")
 
         self.print_result("Caption hook", content.get("caption", {}).get("hook", "")[:60])
         return content
