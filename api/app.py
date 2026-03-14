@@ -977,6 +977,7 @@ async def publish_post_now(brand_slug: str, post_id: str, request: Request):
         media_url = base + media_url
 
     api = InstagramAPI(brand)
+    _glog(f"Publish: brand='{brand_slug}' account_id='{api.account_id}' has_creds={api._has_credentials} media_url='{media_url[:80]}…'")
     result = api.schedule_post({
         "post_id": post_id,
         "caption": caption.strip(),

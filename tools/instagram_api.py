@@ -4,9 +4,7 @@ Instagram / Meta Graph API wrapper.
 Supports per-brand credentials from the brand profile JSON:
   brand_profile["meta_credentials"] = {
       "access_token": "EAA...",
-      "instagram_business_account_id": "17841...",
-      "app_id": "...",
-      "app_secret": "..."
+      "instagram_account_id": "17841...",
   }
 
 Falls back to global .env variables when brand-level credentials are absent.
@@ -28,6 +26,12 @@ from config.settings import (
     RUN_MODE,
 )
 
+_PLACEHOLDER_IDS = {
+    "",
+    "your_instagram_business_account_id_here",
+    "CHANGE_ME",
+}
+
 
 class InstagramAPI:
     BASE_URL = "https://graph.facebook.com/v19.0"
@@ -36,19 +40,32 @@ class InstagramAPI:
         """
         Priority for credentials:
           1. brand_profile["meta_credentials"]  (per-client credentials)
-          2. Global .env vars                   (fallback / single-brand use)
+          2. brand_profile top-level keys       (legacy shorthand)
+          3. Global .env vars                   (fallback / single-brand use)
         """
-        creds = (brand_profile or {}).get("meta_credentials", {})
-        self.access_token = creds.get("access_token") or META_ACCESS_TOKEN
-        self.account_id   = (creds.get("instagram_account_id")
-                             or creds.get("instagram_business_account_id")
-                             or INSTAGRAM_BUSINESS_ACCOUNT_ID)
-        self.app_id       = creds.get("app_id", "")
-        self.app_secret   = creds.get("app_secret", "")
+        bp = brand_profile or {}
+        creds = bp.get("meta_credentials") or {}
+
+        self.access_token = (
+            creds.get("access_token")
+            or bp.get("access_token")
+            or META_ACCESS_TOKEN
+        )
+        self.account_id = (
+            creds.get("instagram_account_id")
+            or creds.get("instagram_business_account_id")
+            or bp.get("instagram_account_id")
+            or bp.get("instagram_business_account_id")
+            or INSTAGRAM_BUSINESS_ACCOUNT_ID
+        )
 
     @property
     def _has_credentials(self) -> bool:
-        return bool(self.access_token and self.account_id)
+        return bool(
+            self.access_token
+            and self.account_id
+            and self.account_id not in _PLACEHOLDER_IDS
+        )
 
     # ── Media Publishing ───────────────────────────────────────────────────────
 
@@ -69,7 +86,7 @@ class InstagramAPI:
             "access_token": self.access_token,
         }
 
-        if media_type == "VIDEO" or media_type == "REELS":
+        if media_type in ("VIDEO", "REELS"):
             payload["video_url"] = media_url
             payload["media_type"] = "REELS"
         else:
@@ -96,7 +113,7 @@ class InstagramAPI:
     def schedule_post(self, post_data: dict) -> dict:
         """
         Schedule or immediately publish a post.
-        In live mode uses Meta's content_publishing_limit endpoint.
+        Two-step flow: create container → wait → publish.
         """
         if RUN_MODE == "demo" or not self._has_credentials:
             return {
@@ -104,25 +121,42 @@ class InstagramAPI:
                 "post_id": post_data.get("post_id"),
                 "scheduled_time": post_data.get("scheduled_time"),
                 "message": "Would publish via Meta Graph API in live mode",
+                "credentials_found": self._has_credentials,
+                "account_id_used": self.account_id or "(none)",
             }
 
         try:
+            # STEP 1: Create the media container
+            media_url = post_data.get("media_url", "")
+            caption = post_data.get("caption", "")
+            post_type = (post_data.get("post_type") or "image").lower()
+            media_type = "REELS" if post_type == "reel" else "IMAGE"
+
             container = self.create_media_container(
-                media_url=post_data.get("media_url", ""),
-                caption=post_data.get("caption", ""),
-                media_type="IMAGE" if post_data.get("post_type") != "reel" else "REELS",
+                media_url=media_url,
+                caption=caption,
+                media_type=media_type,
             )
+
             container_id = container.get("id")
             if not container_id:
                 err = container.get("error", {})
                 msg = err.get("message", "") if isinstance(err, dict) else str(err)
                 return {"status": "error", "detail": msg or json.dumps(container)}
 
-            # Wait for container to be ready
+            # STEP 2: Wait for Meta to process the media
             time.sleep(5)
 
+            # STEP 3: Publish the container
             result = self.publish_media(container_id)
-            result["status"] = "published"
+
+            if result.get("id"):
+                result["status"] = "published"
+            else:
+                err = result.get("error", {})
+                msg = err.get("message", "") if isinstance(err, dict) else str(err)
+                result = {"status": "error", "detail": msg or json.dumps(result)}
+
             return result
         except Exception as e:
             return {"status": "error", "detail": str(e)}
@@ -136,9 +170,8 @@ class InstagramAPI:
         since: Optional[str] = None,
         until: Optional[str] = None,
     ) -> dict:
-        """Fetch account-level insights from Instagram Insights API."""
         if RUN_MODE == "demo" or not self._has_credentials:
-            return self._mock_account_insights(metrics)
+            return self._demo_insights(metrics)
 
         endpoint = f"{self.BASE_URL}/{self.account_id}/insights"
         params: dict = {
@@ -155,9 +188,8 @@ class InstagramAPI:
         return resp.json()
 
     def get_post_insights(self, post_id: str, metrics: list[str]) -> dict:
-        """Fetch insights for a specific post."""
         if RUN_MODE == "demo" or not self._has_credentials:
-            return self._mock_post_insights(post_id, metrics)
+            return {"data": [{"name": m, "values": [{"value": 42}]} for m in metrics]}
 
         endpoint = f"{self.BASE_URL}/{post_id}/insights"
         params = {
@@ -167,10 +199,11 @@ class InstagramAPI:
         resp = requests.get(endpoint, params=params, timeout=30)
         return resp.json()
 
+    # ── Media & Comments ───────────────────────────────────────────────────────
+
     def get_media_list(self, limit: int = 25) -> dict:
-        """Get recent media posts."""
         if RUN_MODE == "demo" or not self._has_credentials:
-            return self._mock_media_list()
+            return {"data": []}
 
         endpoint = f"{self.BASE_URL}/{self.account_id}/media"
         params = {
@@ -182,87 +215,42 @@ class InstagramAPI:
         return resp.json()
 
     def get_comments(self, media_id: str, limit: int = 50) -> dict:
-        """Get comments on a specific post."""
         if RUN_MODE == "demo" or not self._has_credentials:
-            return self._mock_comments()
+            return {"data": []}
 
         endpoint = f"{self.BASE_URL}/{media_id}/comments"
         params = {
-            "fields": "id,text,username,timestamp,like_count",
+            "fields": "id,text,username,timestamp",
             "limit": limit,
             "access_token": self.access_token,
         }
         resp = requests.get(endpoint, params=params, timeout=30)
         return resp.json()
 
-    def reply_to_comment(self, media_id: str, comment_id: str, reply_text: str) -> dict:
-        """Reply to a comment."""
+    def reply_to_comment(self, comment_id: str, message: str) -> dict:
         if RUN_MODE == "demo" or not self._has_credentials:
-            return {"status": "demo_replied", "comment_id": comment_id}
+            return {"id": f"mock_reply_{int(time.time())}"}
 
-        endpoint = f"{self.BASE_URL}/{media_id}/replies"
+        endpoint = f"{self.BASE_URL}/{comment_id}/replies"
         payload = {
-            "message": reply_text,
+            "message": message,
             "access_token": self.access_token,
         }
         resp = requests.post(endpoint, data=payload, timeout=30)
         return resp.json()
 
-    # ── Mock data helpers ──────────────────────────────────────────────────────
+    # ── Demo helpers ───────────────────────────────────────────────────────────
 
     @staticmethod
-    def _mock_account_insights(metrics: list) -> dict:
-        return {
-            "data": [
-                {"name": m, "period": "day", "values": [{"value": 100 + i * 50}]}
-                for i, m in enumerate(metrics)
-            ],
-            "source": "demo_mock",
-        }
-
-    @staticmethod
-    def _mock_post_insights(post_id: str, metrics: list) -> dict:
-        mock_values = {
-            "impressions": 8400,
-            "reach": 5200,
-            "likes": 420,
-            "comments": 64,
-            "shares": 88,
-            "saved": 312,
-            "engagement": 884,
-        }
-        return {
-            "data": [
-                {"name": m, "values": [{"value": mock_values.get(m, 0)}]}
-                for m in metrics
-            ],
-            "source": "demo_mock",
-        }
-
-    @staticmethod
-    def _mock_media_list() -> dict:
+    def _demo_insights(metrics: list[str]) -> dict:
+        from random import randint
         return {
             "data": [
                 {
-                    "id": f"post_{i}",
-                    "caption": f"Sample post {i} caption #nordicjewellery",
-                    "media_type": ["IMAGE", "VIDEO", "CAROUSEL_ALBUM"][i % 3],
-                    "timestamp": datetime.now().isoformat(),
-                    "like_count": 200 + i * 80,
-                    "comments_count": 12 + i * 8,
+                    "name": m,
+                    "period": "day",
+                    "values": [{"value": randint(50, 500)}],
                 }
-                for i in range(1, 6)
-            ],
-            "source": "demo_mock",
-        }
-
-    @staticmethod
-    def _mock_comments() -> dict:
-        return {
-            "data": [
-                {"id": "c001", "text": "This is beautiful!", "username": "user1", "timestamp": datetime.now().isoformat()},
-                {"id": "c002", "text": "How much is this?", "username": "user2", "timestamp": datetime.now().isoformat()},
-                {"id": "c003", "text": "Do you ship to the US?", "username": "user3", "timestamp": datetime.now().isoformat()},
-            ],
-            "source": "demo_mock",
+                for m in metrics
+            ]
         }
