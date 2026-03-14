@@ -131,6 +131,7 @@ You adapt tone precisely to each brand's voice."""
         strategy = inputs.get("strategy_plan", {})
         languages = inputs.get("languages") or brand.get("languages") or ["English"]
         available_photos = inputs.get("available_photo_indices")
+        photo_public_urls = inputs.get("photo_public_urls", {})
 
         post_id = post.get("id", "unknown")
         post_type = (post.get("type") or "post").lower()
@@ -152,7 +153,8 @@ You adapt tone precisely to each brand's voice."""
                 selected_idx = 0  # fallback if somehow empty
 
             p = products[selected_idx] if selected_idx < len(products) else products[0]
-            photo_url = f"/api/brands/{slug}/products/{selected_idx}/image"
+            # Prefer public URL from DB (works with Instagram API), fall back to relative
+            photo_url = photo_public_urls.get(selected_idx, f"/api/brands/{slug}/products/{selected_idx}/image")
             price_str = f"${p.get('price_usd', p.get('price_eur', ''))}" if p.get("price_usd") or p.get("price_eur") else "price unlisted"
             # Extract the campaign planner's strategic direction for this post
             brief = post.get("content_brief", "")

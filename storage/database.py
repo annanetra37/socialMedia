@@ -78,6 +78,7 @@ def init_db() -> None:
             product_idx  INT  NOT NULL,
             image_data   BYTEA NOT NULL,
             content_type TEXT NOT NULL DEFAULT 'image/jpeg',
+            public_url   TEXT DEFAULT NULL,
             used         BOOLEAN NOT NULL DEFAULT FALSE,
             used_where   TEXT DEFAULT NULL,
             created_at   TIMESTAMPTZ DEFAULT NOW(),
@@ -99,6 +100,12 @@ def init_db() -> None:
                     ) THEN
                         ALTER TABLE product_images ADD COLUMN used BOOLEAN NOT NULL DEFAULT FALSE;
                         ALTER TABLE product_images ADD COLUMN used_where TEXT DEFAULT NULL;
+                    END IF;
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name='product_images' AND column_name='public_url'
+                    ) THEN
+                        ALTER TABLE product_images ADD COLUMN public_url TEXT DEFAULT NULL;
                     END IF;
                 END $$;
             """)
@@ -245,17 +252,20 @@ def get_all_by_type(brand_slug: str, data_type: str) -> list[dict]:
 # product_images table
 # ════════════════════════════════════════════════════════════════════════════
 
-def upsert_product_image(brand_slug: str, product_idx: int, image_data: bytes, content_type: str) -> None:
+def upsert_product_image(brand_slug: str, product_idx: int, image_data: bytes,
+                         content_type: str, public_url: str | None = None) -> None:
     with _conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO product_images (brand_slug, product_idx, image_data, content_type)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO product_images (brand_slug, product_idx, image_data, content_type, public_url)
+                VALUES (%s, %s, %s, %s, %s)
                 ON CONFLICT (brand_slug, product_idx) DO UPDATE
-                    SET image_data = EXCLUDED.image_data, content_type = EXCLUDED.content_type
+                    SET image_data = EXCLUDED.image_data,
+                        content_type = EXCLUDED.content_type,
+                        public_url = EXCLUDED.public_url
                 """,
-                (brand_slug, product_idx, psycopg2.Binary(image_data), content_type),
+                (brand_slug, product_idx, psycopg2.Binary(image_data), content_type, public_url),
             )
 
 
@@ -268,6 +278,32 @@ def get_product_image(brand_slug: str, product_idx: int) -> tuple[bytes, str] | 
             )
             row = cur.fetchone()
             return (bytes(row[0]), row[1]) if row else None
+
+
+def get_product_image_public_url(brand_slug: str, product_idx: int) -> str | None:
+    """Return the public_url for a product image, if set."""
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT public_url FROM product_images WHERE brand_slug=%s AND product_idx=%s",
+                (brand_slug, product_idx),
+            )
+            row = cur.fetchone()
+            return row[0] if row and row[0] else None
+
+
+def get_all_product_image_urls(brand_slug: str) -> list[dict]:
+    """Return [{product_idx, public_url, used, used_where}] for all images of a brand."""
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT product_idx, public_url, used, used_where FROM product_images WHERE brand_slug=%s ORDER BY product_idx",
+                (brand_slug,),
+            )
+            return [
+                {"product_idx": r[0], "public_url": r[1], "used": r[2], "used_where": r[3]}
+                for r in cur.fetchall()
+            ]
 
 
 def mark_image_used(brand_slug: str, product_idx: int, post_id: str) -> None:

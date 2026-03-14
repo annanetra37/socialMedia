@@ -240,6 +240,15 @@ class DataStore:
             available = all_indices
         return available
 
+    def get_product_photo_urls(self, brand: dict) -> dict[int, str]:
+        """Return {product_idx: public_url} for all photos that have a public_url set."""
+        if _USE_DB:
+            from storage.database import get_all_product_image_urls
+            rows = get_all_product_image_urls(self.brand_slug)
+            return {r["product_idx"]: r["public_url"] for r in rows if r.get("public_url")}
+        # JSON fallback: no public URLs stored locally
+        return {}
+
     # ── Summary ────────────────────────────────────────────────────────────────
 
     def get_session_summary(self) -> dict:
