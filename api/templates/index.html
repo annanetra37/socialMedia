@@ -1884,9 +1884,13 @@ function renderContent() {
               return '';
             })();
 
-            const isPublicUrl = mediaUrl && (mediaUrl.startsWith('https://') || mediaUrl.startsWith('http://'));
-            const isRelativeUrl = mediaUrl && !isPublicUrl;
-            const hasMedia = !!mediaUrl;
+            // Resolve relative URLs to absolute using current origin
+            const resolvedMediaUrl = (mediaUrl && !mediaUrl.startsWith('http://') && !mediaUrl.startsWith('https://'))
+              ? window.location.origin + mediaUrl
+              : mediaUrl;
+            const isPublicUrl = resolvedMediaUrl && (resolvedMediaUrl.startsWith('https://') || resolvedMediaUrl.startsWith('http://'));
+            const isRelativeUrl = false;  // resolved above
+            const hasMedia = !!resolvedMediaUrl;
             const isReady = !!finalCaption && isPublicUrl;
 
             let statusHtml, statusClass;
@@ -1910,7 +1914,7 @@ function renderContent() {
             }
 
             const imgPreview = isPublicUrl
-              ? '<div style="margin:10px 0;"><img src="' + esc(mediaUrl) + '" style="max-width:100%;max-height:240px;border-radius:8px;border:1px solid var(--border);" onerror="this.outerHTML=\'<div style=\\\'padding:12px;color:var(--muted);font-size:12px;background:var(--card-bg);border-radius:6px;border:1px dashed var(--border);\\\'>Image failed to load — URL may be expired or invalid</div>\'" /></div>'
+              ? '<div style="margin:10px 0;"><img src="' + esc(resolvedMediaUrl) + '" style="max-width:100%;max-height:240px;border-radius:8px;border:1px solid var(--border);" onerror="this.outerHTML=\'<div style=\\\'padding:12px;color:var(--muted);font-size:12px;background:var(--card-bg);border-radius:6px;border:1px dashed var(--border);\\\'>Image failed to load — URL may be expired or invalid</div>\'" /></div>'
               : '';
 
             return accordionItem('preview-'+idx, '&#128064; Post Preview',

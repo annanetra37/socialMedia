@@ -383,12 +383,11 @@ class Orchestrator:
                 "brand_profile": self.brand,
             })
 
-            # For image posts with a selected product photo, stamp the public
-            # URL directly as media_url so the publish flow can use it as-is.
+            # For image posts with a selected product photo, stamp the media_url.
+            # Prefer public URL; fall back to relative path (resolved to absolute at publish time).
             if post_type == "image" and selected_idx is not None:
                 public_url = photo_public_urls.get(selected_idx)
-                if public_url:
-                    visual["media_url"] = public_url
+                visual["media_url"] = public_url or f"/api/brands/{self.store.brand_slug}/products/{selected_idx}/image"
 
             self.store.save_visual(visual, post["id"])
 
