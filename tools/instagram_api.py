@@ -112,7 +112,9 @@ class InstagramAPI:
             )
             container_id = container.get("id")
             if not container_id:
-                return {"status": "error", "detail": container}
+                err = container.get("error", {})
+                msg = err.get("message", "") if isinstance(err, dict) else str(err)
+                return {"status": "error", "detail": msg or json.dumps(container)}
 
             # Wait for container to be ready
             time.sleep(5)
