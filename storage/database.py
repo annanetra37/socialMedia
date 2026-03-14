@@ -73,7 +73,8 @@ def init_db() -> None:
         """,
         "CREATE INDEX IF NOT EXISTS idx_bd_lookup ON brand_data (brand_slug, data_type)",
         "CREATE INDEX IF NOT EXISTS idx_bd_period ON brand_data (brand_slug, data_type, period_key)",
-        "CREATE INDEX IF NOT EXISTS idx_bd_posttype ON brand_data (brand_slug, post_type) WHERE post_type IS NOT NULL",
+        # NOTE: idx_bd_posttype is created in the migration block below,
+        # after ensuring the post_type column exists.
         """
         CREATE TABLE IF NOT EXISTS product_images (
             brand_slug   TEXT NOT NULL,
@@ -132,6 +133,11 @@ def init_db() -> None:
                 UPDATE brand_data
                 SET post_type = 'reel'
                 WHERE post_type IS NULL AND data_type = 'reels'
+            """)
+            # Ensure post_type index exists (safe for both fresh and migrated DBs)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_bd_posttype
+                    ON brand_data (brand_slug, post_type) WHERE post_type IS NOT NULL
             """)
 
 
