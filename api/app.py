@@ -559,15 +559,22 @@ _IMAGE_EXTS = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 
 
 @app.post("/api/brands/{brand_slug}/products/{product_idx}/image")
-async def upload_product_image(brand_slug: str, product_idx: int, file: UploadFile = File(...)):
+async def upload_product_image(brand_slug: str, product_idx: int, request: Request, file: UploadFile = File(...)):
     """Upload a product photo."""
     import os
     if file.content_type not in _ALLOWED_IMAGE_TYPES:
         raise HTTPException(status_code=400, detail="Only JPEG, PNG and WebP images are allowed")
     contents = await file.read()
+
+    # Build the public URL for this image
+    relative_path = f"/api/brands/{brand_slug}/products/{product_idx}/image"
+    base = str(request.base_url).rstrip("/")
+    public_url = base + relative_path
+
     if os.getenv("DATABASE_URL"):
         from storage.database import upsert_product_image
-        upsert_product_image(brand_slug, product_idx, contents, file.content_type or "image/jpeg")
+        upsert_product_image(brand_slug, product_idx, contents,
+                             file.content_type or "image/jpeg", public_url=public_url)
     else:
         img_dir = STORAGE_DIR / brand_slug / "product_images"
         img_dir.mkdir(parents=True, exist_ok=True)
@@ -575,7 +582,7 @@ async def upload_product_image(brand_slug: str, product_idx: int, file: UploadFi
         for old in img_dir.glob(f"{product_idx}.*"):
             old.unlink(missing_ok=True)
         (img_dir / f"{product_idx}{ext}").write_bytes(contents)
-    return {"saved": True, "url": f"/api/brands/{brand_slug}/products/{product_idx}/image"}
+    return {"saved": True, "url": relative_path, "public_url": public_url}
 
 
 @app.get("/api/brands/{brand_slug}/products/{product_idx}/image")
@@ -596,6 +603,23 @@ async def serve_product_image(brand_slug: str, product_idx: int):
             if p.exists():
                 return FileResponse(str(p))
     raise HTTPException(status_code=404, detail="No image found")
+
+
+@app.get("/api/brands/{brand_slug}/products/images")
+async def list_product_images(brand_slug: str):
+    """List all product images with their public URLs and usage status."""
+    import os
+    if os.getenv("DATABASE_URL"):
+        from storage.database import get_all_product_image_urls
+        images = get_all_product_image_urls(brand_slug)
+    else:
+        img_dir = STORAGE_DIR / brand_slug / "product_images"
+        images = []
+        if img_dir.exists():
+            for f in sorted(img_dir.iterdir()):
+                idx = int(f.stem)
+                images.append({"product_idx": idx, "public_url": None, "used": False, "used_where": None})
+    return {"brand_slug": brand_slug, "images": images}
 
 
 @app.post("/api/cycle/run")
@@ -837,15 +861,30 @@ async def publish_post_now(brand_slug: str, post_id: str):
     if ht:
         caption = caption.strip() + "\n\n" + ht
 
-    # Try to get a media URL from the saved visual package
-    visual = store.load("visuals", f"{post_id}.json")
+    # Try to get a media URL — prefer public_url from product_images DB
+    visual = store.load("visuals", f"{post_id}.json") or {}
     media_url = ""
-    if visual:
+
+    # 1. Check for DALL-E generated URL first
+    media_url = (
+        visual.get("image_url")
+        or visual.get("media_url")
+        or visual.get("primary_image", {}).get("generated_url", "")
+    )
+
+    # 2. Fall back to product photo public_url from DB
+    if not media_url:
+        import os
+        selected_idx = content.get("selected_product_idx")
+        if selected_idx is not None and os.getenv("DATABASE_URL"):
+            from storage.database import get_product_image_public_url
+            media_url = get_product_image_public_url(brand_slug, int(selected_idx)) or ""
+
+    # 3. Last resort: visual's product_photo_url (may be relative — won't work with IG API)
+    if not media_url:
         media_url = (
-            visual.get("image_url")
-            or visual.get("media_url")
-            or visual.get("primary_image", {}).get("url", "")
-            or visual.get("primary_image", {}).get("generated_url", "")
+            visual.get("primary_image", {}).get("product_photo_url", "")
+            or content.get("selected_product_photo_url", "")
         )
 
     api = InstagramAPI(brand)

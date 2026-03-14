@@ -325,8 +325,11 @@ class Orchestrator:
 
             # Get available photos for image posts
             available_photos = None
+            photo_public_urls = {}
             if post_type == "image":
                 available_photos = self.store.get_available_product_indices(self.brand)
+                # Load public URLs for available photos
+                photo_public_urls = self.store.get_product_photo_urls(self.brand)
 
             # Content (caption, hashtags)
             content = self.content_agent.run({
@@ -334,6 +337,7 @@ class Orchestrator:
                 "brand_profile": self.brand,
                 "strategy_plan": strategy,
                 "available_photo_indices": available_photos,
+                "photo_public_urls": photo_public_urls,
             })
 
             # Track the used photo
