@@ -751,6 +751,7 @@ async def get_content_packages(brand_slug: str):
             "hashtags":     content.get("hashtags", content.get("hashtag_cluster", [])),
             "alt_text":     content.get("alt_text", ""),
             "content_notes": content.get("content_notes", ""),
+            "selected_product_photo_url": content.get("selected_product_photo_url", ""),
             "visual":       store.load("visuals", fname),
             "reel":         store.load("reels", fname),
         }

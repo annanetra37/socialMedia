@@ -194,18 +194,17 @@ class DataStore:
 
     # ── Used product image tracking ───────────────────────────────────────────
 
-    def load_used_images(self) -> list[dict]:
-        """Return list of {product_idx, post_id} records for images already used."""
-        data = self.load("used_images", "tracker.json")
-        if isinstance(data, dict):
-            return data.get("used", [])
-        return []
-
     def save_used_image(self, product_idx: int, post_id: str) -> None:
         """Mark a product image as used by a specific post."""
-        records = self.load_used_images()
-        records.append({"product_idx": product_idx, "post_id": post_id})
-        self.save("used_images", "tracker.json", {"used": records})
+        if _USE_DB:
+            from storage.database import mark_image_used
+            mark_image_used(self.brand_slug, product_idx, post_id)
+        else:
+            # JSON fallback: store in tracker file
+            data = self.load("used_images", "tracker.json")
+            records = data.get("used", []) if isinstance(data, dict) else []
+            records.append({"product_idx": product_idx, "post_id": post_id})
+            self.save("used_images", "tracker.json", {"used": records})
 
     def get_available_product_indices(self, brand: dict) -> list[int]:
         """Return product indices that haven't been used yet.
@@ -214,11 +213,29 @@ class DataStore:
         if not products:
             return []
         all_indices = list(range(len(products)))
-        used = self.load_used_images()
-        used_indices = {r["product_idx"] for r in used}
+
+        if _USE_DB:
+            from storage.database import (
+                get_available_image_indices, get_all_image_indices, reset_images_used
+            )
+            available = get_available_image_indices(self.brand_slug)
+            # If no images in DB at all, fall back to brand profile product count
+            if not available:
+                all_db = get_all_image_indices(self.brand_slug)
+                if all_db:
+                    # All used — round-robin reset
+                    reset_images_used(self.brand_slug)
+                    available = all_db
+                else:
+                    available = all_indices
+            return available
+
+        # JSON fallback
+        data = self.load("used_images", "tracker.json")
+        records = data.get("used", []) if isinstance(data, dict) else []
+        used_indices = {r["product_idx"] for r in records}
         available = [i for i in all_indices if i not in used_indices]
         if not available:
-            # All photos used — reset tracker and return all
             self.save("used_images", "tracker.json", {"used": []})
             available = all_indices
         return available
