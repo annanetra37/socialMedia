@@ -136,6 +136,10 @@ def list_brands() -> list[dict]:
 def delete_brand(slug: str) -> None:
     with _conn() as conn:
         with conn.cursor() as cur:
+            # product_images has no FK cascade — delete explicitly
+            cur.execute("DELETE FROM product_images WHERE brand_slug = %s", (slug,))
+            # brand_data cascades via FK, but delete explicitly to be safe
+            cur.execute("DELETE FROM brand_data WHERE brand_slug = %s", (slug,))
             cur.execute("DELETE FROM brands WHERE slug = %s", (slug,))
 
 

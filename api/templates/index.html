@@ -2666,8 +2666,8 @@ function renderBrandsList(brands, statuses=[]) {
           <div style="display:flex;gap:6px;flex-wrap:wrap;">
             <button class="btn btn-ghost btn-sm" onclick="selectBrand('${b.slug}','${esc(b.name)}');showSection('dashboard');">View</button>
             <a class="btn btn-primary btn-sm" href="/api/oauth/connect/${b.slug}" title="Authorize via Facebook OAuth">${connectLabel}</a>
-            ${b.source === 'uploaded' ? `<button class="btn btn-ghost btn-sm" onclick="editBrand('${b.slug}')" title="Edit brand">✏️ Edit</button>
-            <button class="btn btn-danger btn-sm" onclick="deleteBrand('${b.slug}','${esc(b.name)}')" title="Delete brand">🗑</button>` : ''}
+            <button class="btn btn-ghost btn-sm" onclick="editBrand('${b.slug}')" title="Edit brand">✏️ Edit</button>
+            <button class="btn btn-ghost btn-sm" onclick="deleteBrand('${b.slug}','${esc(b.name)}')" title="Delete brand and all data" style="color:var(--danger);">🗑 Delete</button>
           </div>
         </td>
       </tr>`;
@@ -3156,11 +3156,16 @@ async function editBrand(slug) {
 }
 
 async function deleteBrand(slug, name) {
-  if (!confirm(`Delete brand "${name}"?\n\nThis removes all stored data and cannot be undone.`)) return;
+  if (!confirm(`Delete brand "${name}" and ALL its data?\n\nThis deletes: campaigns, content, strategy, trends, analytics, product photos, schedules.\n\nThis CANNOT be undone.`)) return;
   try {
     const r = await fetch(`/api/brands/${slug}`, { method: 'DELETE' });
     if (!r.ok) { const e=await r.json(); throw new Error(e.detail||r.statusText); }
     toast(`Brand "${name}" deleted`, 'success');
+    // Clear selection if the deleted brand was active
+    if (S.brand === slug) {
+      S.brand = null; S.res = {}; S.pkgs = [];
+      document.getElementById('brand-name').textContent = 'No brand selected';
+    }
     await loadBrands();
     if (S.section === 'brands') loadBrandsList();
     if (S.section === 'agency') loadAgency();
