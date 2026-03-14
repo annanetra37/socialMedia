@@ -287,8 +287,10 @@ def _run_cycle_task(job_id: str, brand_slug: str, cycle: str, week: int, day: st
             # Get available (unused) product photo indices for image posts
             post_type = (post_brief.get("type") or "post").lower()
             available_photos = None
+            photo_public_urls = {}
             if post_type == "image":
                 available_photos = store.get_available_product_indices(brand)
+                photo_public_urls = store.get_product_photo_urls(brand)
                 if available_photos:
                     _append_log(job_id, f"Available unused photos: indices {available_photos}")
                 else:
@@ -299,6 +301,7 @@ def _run_cycle_task(job_id: str, brand_slug: str, cycle: str, week: int, day: st
                 "post_brief": post_brief, "brand_profile": brand, "strategy_plan": strategy,
                 "languages": langs,
                 "available_photo_indices": available_photos,
+                "photo_public_urls": photo_public_urls,
             })
 
             # Track the used photo so it won't be reused
@@ -314,6 +317,12 @@ def _run_cycle_task(job_id: str, brand_slug: str, cycle: str, week: int, day: st
             visual = orch.visual_agent.run({
                 "post_brief": post_brief, "content_package": content, "brand_profile": brand,
             })
+
+            # Stamp media_url for image posts with selected product photo
+            if post_type == "image" and selected_idx is not None:
+                public_url = photo_public_urls.get(selected_idx)
+                visual["media_url"] = public_url or f"/api/brands/{brand_slug}/products/{selected_idx}/image"
+
             store.save_visual(visual, post_id)
             _append_log(job_id, "✓ Visual brief generated")
 
@@ -920,7 +929,7 @@ async def update_campaign_post(brand_slug: str, post_id: str, request: Request):
 
 
 @app.post("/api/brands/{brand_slug}/posts/{post_id}/publish-now")
-async def publish_post_now(brand_slug: str, post_id: str):
+async def publish_post_now(brand_slug: str, post_id: str, request: Request):
     """Immediately publish a saved content package to Instagram."""
     from tools.instagram_api import InstagramAPI
 
@@ -961,6 +970,11 @@ async def publish_post_now(brand_slug: str, post_id: str):
         if selected_idx is not None and os.getenv("DATABASE_URL"):
             from storage.database import get_product_image_public_url
             media_url = get_product_image_public_url(brand_slug, int(selected_idx)) or ""
+
+    # Resolve relative URLs to absolute using server's public base URL
+    if media_url and not media_url.startswith(("http://", "https://")):
+        base = str(request.base_url).rstrip("/")
+        media_url = base + media_url
 
     api = InstagramAPI(brand)
     result = api.schedule_post({
