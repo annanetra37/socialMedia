@@ -875,17 +875,18 @@ tr:hover td { background: rgba(108,99,255,.04); }
     </div>
     <!-- Visual tab -->
     <div id="dtab-visual" style="display:none;">
+      <div class="detail-section" id="dp-photo-preview"></div>
       <div class="detail-section">
-        <div class="detail-section-label">Image Prompt</div>
+        <div class="detail-section-label">Color Palette</div>
+        <div id="dp-palette" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;"></div>
+      </div>
+      <div class="detail-section">
+        <div class="detail-section-label">Visual Description</div>
         <div class="detail-text" id="dp-img-prompt"></div>
       </div>
       <div class="detail-section">
         <div class="detail-section-label">Photography Brief</div>
         <div class="detail-text" id="dp-photo-brief"></div>
-      </div>
-      <div class="detail-section">
-        <div class="detail-section-label">Color Palette</div>
-        <div id="dp-palette" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;"></div>
       </div>
     </div>
     <!-- Reel tab -->
@@ -1785,8 +1786,26 @@ function renderContent() {
              </div>
              <button class="btn btn-ghost btn-sm" onclick="copyText(${JSON.stringify(Array.isArray(hashtags)?hashtags.join(' '):hashtags)},this)">📋 Copy All</button>`
           )}
-          ${accordionItem('visual-'+idx, '🖼 Visual Brief',
-            `<div class="caption-pre">${esc(typeof visual==='string'?visual:(visual.image_prompt||visual.prompt||JSON.stringify(visual,null,2)))}</div>`
+          ${accordionItem('visual-'+idx, '🖼 Visual',
+            `${(function(){
+              const pImg = visual.primary_image || {};
+              const pUrl = pkg.selected_product_photo_url || pImg.product_photo_url || null;
+              const genUrl = pImg.generated_url || null;
+              const showUrl = genUrl || pUrl;
+              const palette = visual.colour_palette || visual.color_palette || {};
+              const hexVals = Object.values(palette).filter(v => typeof v==='string' && v.startsWith('#'));
+              let html = '';
+              if (showUrl) {
+                html += '<div style="margin-bottom:10px;"><img src="' + esc(showUrl) + '" style="max-width:100%;max-height:280px;border-radius:8px;border:1px solid var(--border);" onerror="this.style.display=\'none\'" /></div>';
+              }
+              if (hexVals.length) {
+                html += '<div style="display:flex;gap:6px;margin-bottom:8px;">' + hexVals.map(c => '<span style="background:'+esc(c)+';width:20px;height:20px;border-radius:4px;display:inline-block;border:1px solid var(--border)" title="'+esc(c)+'"></span>').join('') + '</div>';
+              }
+              const desc = pImg.description || visual.grid_notes || '';
+              if (desc) html += '<div class="caption-pre" style="font-size:11px;color:var(--muted);max-height:80px;overflow:auto;">' + esc(desc) + '</div>';
+              if (!html) html = '<span style="color:var(--muted);font-size:12px;">No visual yet</span>';
+              return html;
+            })()}`
           )}
           ${hasReel ? accordionItem('reel-'+idx, '🎬 Reel Script',
             `<div class="caption-pre">${esc(typeof reelScript==='string'?reelScript:JSON.stringify(reelScript,null,2))}</div>`
@@ -2666,8 +2685,8 @@ function renderBrandsList(brands, statuses=[]) {
           <div style="display:flex;gap:6px;flex-wrap:wrap;">
             <button class="btn btn-ghost btn-sm" onclick="selectBrand('${b.slug}','${esc(b.name)}');showSection('dashboard');">View</button>
             <a class="btn btn-primary btn-sm" href="/api/oauth/connect/${b.slug}" title="Authorize via Facebook OAuth">${connectLabel}</a>
-            ${b.source === 'uploaded' ? `<button class="btn btn-ghost btn-sm" onclick="editBrand('${b.slug}')" title="Edit brand">✏️ Edit</button>
-            <button class="btn btn-danger btn-sm" onclick="deleteBrand('${b.slug}','${esc(b.name)}')" title="Delete brand">🗑</button>` : ''}
+            <button class="btn btn-ghost btn-sm" onclick="editBrand('${b.slug}')" title="Edit brand">✏️ Edit</button>
+            <button class="btn btn-ghost btn-sm" onclick="deleteBrand('${b.slug}','${esc(b.name)}')" title="Delete brand and all data" style="color:var(--danger);">🗑 Delete</button>
           </div>
         </td>
       </tr>`;
@@ -2764,7 +2783,18 @@ function openPostDetail(postId) {
   const imgPrompt = primaryImg.ai_generation_prompt || primaryImg.description || (typeof visual==='string' ? visual : (visual.image_prompt||visual.prompt||''));
   const photoBrief = primaryImg.photography_brief || (typeof visual==='string' ? '' : (visual.photography_brief||visual.brief||''));
   const photoUrl = merged.selected_product_photo_url || primaryImg.product_photo_url || null;
-  document.getElementById('dp-img-prompt').textContent = imgPrompt || merged.visual_notes || 'No image prompt — generate content first';
+  const generatedUrl = primaryImg.generated_url || null;
+  const showPhotoUrl = generatedUrl || photoUrl;
+
+  // Photo preview
+  const previewEl = document.getElementById('dp-photo-preview');
+  if (showPhotoUrl) {
+    previewEl.innerHTML = `<div class="detail-section-label">Product Photo</div>
+      <img src="${esc(showPhotoUrl)}" style="max-width:100%;max-height:360px;border-radius:8px;border:1px solid var(--border);margin-top:6px;" onerror="this.parentElement.style.display='none'" />`;
+  } else {
+    previewEl.innerHTML = '';
+  }
+  document.getElementById('dp-img-prompt').textContent = imgPrompt || primaryImg.description || merged.visual_notes || 'No visual description yet';
   document.getElementById('dp-photo-brief').textContent = photoBrief;
   const palette = document.getElementById('dp-palette');
   let colorsObj = typeof visual === 'object' ? (visual.colour_palette||visual.color_palette||{}) : {};
@@ -3156,11 +3186,16 @@ async function editBrand(slug) {
 }
 
 async function deleteBrand(slug, name) {
-  if (!confirm(`Delete brand "${name}"?\n\nThis removes all stored data and cannot be undone.`)) return;
+  if (!confirm(`Delete brand "${name}" and ALL its data?\n\nThis deletes: campaigns, content, strategy, trends, analytics, product photos, schedules.\n\nThis CANNOT be undone.`)) return;
   try {
     const r = await fetch(`/api/brands/${slug}`, { method: 'DELETE' });
     if (!r.ok) { const e=await r.json(); throw new Error(e.detail||r.statusText); }
     toast(`Brand "${name}" deleted`, 'success');
+    // Clear selection if the deleted brand was active
+    if (S.brand === slug) {
+      S.brand = null; S.res = {}; S.pkgs = [];
+      document.getElementById('brand-name').textContent = 'No brand selected';
+    }
     await loadBrands();
     if (S.section === 'brands') loadBrandsList();
     if (S.section === 'agency') loadAgency();

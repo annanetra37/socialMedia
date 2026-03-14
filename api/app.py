@@ -519,24 +519,39 @@ async def update_brand(brand_slug: str, request: Request):
 
 @app.delete("/api/brands/{brand_slug}")
 async def delete_brand(brand_slug: str):
-    """Delete a user-uploaded brand and all its data."""
+    """Delete a brand and ALL its data (campaigns, content, images, etc.)."""
     import os
+    from storage.data_store import _slug
     deleted = False
+
     if os.getenv("DATABASE_URL"):
-        from storage.database import delete_brand as db_del, get_brand
-        if not get_brand(brand_slug):
-            raise HTTPException(status_code=404, detail=f"Brand '{brand_slug}' not found")
-        db_del(brand_slug)
+        from storage.database import delete_brand as db_del
+        db_del(brand_slug)  # cascades brand_data, explicitly deletes product_images
         deleted = True
-    else:
-        brand_dir = STORAGE_DIR / brand_slug
-        if not brand_dir.exists():
-            raise HTTPException(status_code=404, detail=f"Brand '{brand_slug}' not found")
+
+    # Also remove filesystem data (covers both local-dev and built-in brand storage)
+    brand_dir = STORAGE_DIR / brand_slug
+    if brand_dir.exists():
         shutil.rmtree(brand_dir)
         deleted = True
-    if deleted:
-        _glog(f"Brand deleted: '{brand_slug}'")
-    return {"deleted": deleted, "slug": brand_slug}
+
+    # Remove built-in profile JSON if it exists
+    for path in BRAND_PROFILES_DIR.glob("*.json"):
+        try:
+            p = json.loads(path.read_text())
+            if _slug(p.get("name", "")) == brand_slug:
+                path.unlink()
+                deleted = True
+                break
+        except Exception:
+            pass
+
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Brand '{brand_slug}' not found")
+
+    # If this was the selected brand, clear selection
+    _glog(f"Brand DELETED: '{brand_slug}' (all data removed)")
+    return {"deleted": True, "slug": brand_slug}
 
 
 _ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
@@ -736,6 +751,7 @@ async def get_content_packages(brand_slug: str):
             "hashtags":     content.get("hashtags", content.get("hashtag_cluster", [])),
             "alt_text":     content.get("alt_text", ""),
             "content_notes": content.get("content_notes", ""),
+            "selected_product_photo_url": content.get("selected_product_photo_url", ""),
             "visual":       store.load("visuals", fname),
             "reel":         store.load("reels", fname),
         }

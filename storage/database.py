@@ -78,6 +78,8 @@ def init_db() -> None:
             product_idx  INT  NOT NULL,
             image_data   BYTEA NOT NULL,
             content_type TEXT NOT NULL DEFAULT 'image/jpeg',
+            used         BOOLEAN NOT NULL DEFAULT FALSE,
+            used_where   TEXT DEFAULT NULL,
             created_at   TIMESTAMPTZ DEFAULT NOW(),
             PRIMARY KEY (brand_slug, product_idx)
         )
@@ -87,6 +89,19 @@ def init_db() -> None:
         with conn.cursor() as cur:
             for stmt in stmts:
                 cur.execute(stmt)
+            # Migrate: add used/used_where columns if table already existed
+            cur.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name='product_images' AND column_name='used'
+                    ) THEN
+                        ALTER TABLE product_images ADD COLUMN used BOOLEAN NOT NULL DEFAULT FALSE;
+                        ALTER TABLE product_images ADD COLUMN used_where TEXT DEFAULT NULL;
+                    END IF;
+                END $$;
+            """)
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -136,6 +151,10 @@ def list_brands() -> list[dict]:
 def delete_brand(slug: str) -> None:
     with _conn() as conn:
         with conn.cursor() as cur:
+            # product_images has no FK cascade — delete explicitly
+            cur.execute("DELETE FROM product_images WHERE brand_slug = %s", (slug,))
+            # brand_data cascades via FK, but delete explicitly to be safe
+            cur.execute("DELETE FROM brand_data WHERE brand_slug = %s", (slug,))
             cur.execute("DELETE FROM brands WHERE slug = %s", (slug,))
 
 
@@ -249,3 +268,45 @@ def get_product_image(brand_slug: str, product_idx: int) -> tuple[bytes, str] | 
             )
             row = cur.fetchone()
             return (bytes(row[0]), row[1]) if row else None
+
+
+def mark_image_used(brand_slug: str, product_idx: int, post_id: str) -> None:
+    """Mark a product image as used by a specific post/content piece."""
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE product_images SET used = TRUE, used_where = %s WHERE brand_slug = %s AND product_idx = %s",
+                (post_id, brand_slug, product_idx),
+            )
+
+
+def reset_images_used(brand_slug: str) -> None:
+    """Reset all images for a brand back to unused (round-robin reset)."""
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE product_images SET used = FALSE, used_where = NULL WHERE brand_slug = %s",
+                (brand_slug,),
+            )
+
+
+def get_available_image_indices(brand_slug: str) -> list[int]:
+    """Return product indices that haven't been used yet."""
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT product_idx FROM product_images WHERE brand_slug = %s AND used = FALSE ORDER BY product_idx",
+                (brand_slug,),
+            )
+            return [row[0] for row in cur.fetchall()]
+
+
+def get_all_image_indices(brand_slug: str) -> list[int]:
+    """Return all product indices for a brand."""
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT product_idx FROM product_images WHERE brand_slug = %s ORDER BY product_idx",
+                (brand_slug,),
+            )
+            return [row[0] for row in cur.fetchall()]
