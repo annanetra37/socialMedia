@@ -264,6 +264,8 @@ class Orchestrator:
             strategy = self._run_strategy(month, trends)
             self.store.save_strategy(strategy)
         campaign = self._run_campaign(strategy, trends, week, target_day=target_day)
+        if target_day:
+            campaign = self._merge_day_into_campaign(campaign, week, target_day)
         self.store.save_campaign(campaign, week=week)
         return {"campaign": campaign, "strategy": strategy, "trends": trends}
 
@@ -288,6 +290,32 @@ class Orchestrator:
     # ══════════════════════════════════════════════════════════════════════════
     # PRIVATE: individual agent runners
     # ══════════════════════════════════════════════════════════════════════════
+
+    def _merge_day_into_campaign(self, new_campaign: dict, week: int, target_day: str) -> dict:
+        """Merge a single-day campaign run into the existing week's campaign.
+
+        Replaces posts for `target_day` while preserving posts from other days.
+        """
+        existing = self.store.load_campaign(week=week)
+        if not existing:
+            return new_campaign
+
+        new_posts = new_campaign.get("posts", [])
+        # Remove old posts for the target day, keep everything else
+        kept_posts = [
+            p for p in existing.get("posts", [])
+            if (p.get("day") or "").lower() != target_day.lower()
+        ]
+        merged_posts = kept_posts + new_posts
+
+        # Use the new campaign as base (it has updated metadata) but with merged posts
+        merged = {**existing, **new_campaign, "posts": merged_posts}
+
+        # Update weekly_summary total
+        if "weekly_summary" in merged:
+            merged["weekly_summary"]["total_posts"] = len(merged_posts)
+
+        return merged
 
     def _run_strategy(self, month: str, trends: dict | None = None) -> dict:
         return self.strategy_agent.run({
