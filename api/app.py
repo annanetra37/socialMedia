@@ -800,6 +800,7 @@ async def get_content_packages(brand_slug: str, post_type: str | None = None):
 
         # Extract caption object — the content agent nests it under "caption"
         caption_data = content.get("caption", {})
+        visual_data = store.load("visuals", fname) or {}
 
         pkg = {
             # Scheduling metadata: prefer campaign plan, fall back to content data
@@ -819,7 +820,8 @@ async def get_content_packages(brand_slug: str, post_type: str | None = None):
             "alt_text":     content.get("alt_text", ""),
             "content_notes": content.get("content_notes", ""),
             "selected_product_photo_url": content.get("selected_product_photo_url", ""),
-            "visual":       store.load("visuals", fname),
+            "visual":       visual_data,
+            "media_url":    visual_data.get("media_url", "") if visual_data else "",
             "reel":         store.load("reels", fname),
         }
         packages.append(pkg)
@@ -904,31 +906,22 @@ async def publish_post_now(brand_slug: str, post_id: str):
     if ht:
         caption = caption.strip() + "\n\n" + ht
 
-    # Try to get a media URL — prefer public_url from product_images DB
+    # Get media URL from visuals — orchestrator stamps media_url directly
+    # for image posts with product photos, so this should just work.
     visual = store.load("visuals", f"{post_id}.json") or {}
-    media_url = ""
+    media_url = visual.get("media_url") or ""
 
-    # 1. Check for DALL-E generated URL first
-    media_url = (
-        visual.get("image_url")
-        or visual.get("media_url")
-        or visual.get("primary_image", {}).get("generated_url", "")
-    )
+    # Fallback: DALL-E generated URL
+    if not media_url:
+        media_url = visual.get("primary_image", {}).get("generated_url", "")
 
-    # 2. Fall back to product photo public_url from DB
+    # Fallback: look up public_url from product_images DB
     if not media_url:
         import os
         selected_idx = content.get("selected_product_idx")
         if selected_idx is not None and os.getenv("DATABASE_URL"):
             from storage.database import get_product_image_public_url
             media_url = get_product_image_public_url(brand_slug, int(selected_idx)) or ""
-
-    # 3. Last resort: visual's product_photo_url (may be relative — won't work with IG API)
-    if not media_url:
-        media_url = (
-            visual.get("primary_image", {}).get("product_photo_url", "")
-            or content.get("selected_product_photo_url", "")
-        )
 
     api = InstagramAPI(brand)
     result = api.schedule_post({

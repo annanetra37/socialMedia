@@ -353,6 +353,14 @@ class Orchestrator:
                 "content_package": content,
                 "brand_profile": self.brand,
             })
+
+            # For image posts with a selected product photo, stamp the public
+            # URL directly as media_url so the publish flow can use it as-is.
+            if post_type == "image" and selected_idx is not None:
+                public_url = photo_public_urls.get(selected_idx)
+                if public_url:
+                    visual["media_url"] = public_url
+
             self.store.save_visual(visual, post["id"])
 
             # Reel production package (only for reels)
