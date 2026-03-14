@@ -123,6 +123,8 @@ Tasks to complete:
 2. Use the calculate_content_mix tool with the past_performance and goals data
 3. Based on your analysis and the trend insights above, produce a complete strategy document
 
+IMPORTANT: Keep your analysis CONCISE — focus on insights, not lengthy prose.
+Skip markdown tables and lengthy narrative. Go straight to your strategic conclusions.
 Your output must end with a JSON block in this exact structure:
 ```json
 {{
@@ -164,7 +166,7 @@ Your output must end with a JSON block in this exact structure:
         if RUN_MODE == "demo":
             return self._demo_output(brand, month)
 
-        raw = self.call_claude(prompt)
+        raw = self.call_claude(prompt, max_tokens=16384)
         strategy = self.extract_json(raw)
         if not strategy:
             strategy = {"raw_response": raw}
