@@ -887,6 +887,38 @@ async def update_content(brand_slug: str, post_id: str, request: Request):
     return {"status": "updated", "post_id": post_id}
 
 
+@app.patch("/api/brands/{brand_slug}/campaign-post/{post_id}")
+async def update_campaign_post(brand_slug: str, post_id: str, request: Request):
+    """Update a single post inside a campaign plan (e.g. change its type)."""
+    store = DataStore.from_slug(brand_slug)
+    body = await request.json()
+
+    # Search all campaign weeks for this post
+    for campaign in store.load_all("campaigns"):
+        for p in campaign.get("posts", []):
+            pid = p.get("id") or p.get("post_id")
+            if pid == post_id:
+                # Apply updates
+                for key in ("type", "priority", "time", "day"):
+                    if key in body:
+                        p[key] = body[key]
+
+                # Recalculate weekly summary
+                campaign["weekly_summary"] = {
+                    "total_posts": len(campaign["posts"]),
+                    "reels": sum(1 for x in campaign["posts"] if x.get("type") == "reel"),
+                    "carousels": sum(1 for x in campaign["posts"] if x.get("type") == "carousel"),
+                    "images": sum(1 for x in campaign["posts"] if x.get("type") == "image"),
+                    "stories": sum(1 for x in campaign["posts"] if x.get("type") == "story"),
+                }
+
+                week = campaign.get("week_number", 1)
+                store.save_campaign(campaign, week=week)
+                return {"status": "updated", "post_id": post_id, "updates": body}
+
+    raise HTTPException(status_code=404, detail=f"Post '{post_id}' not found in any campaign")
+
+
 @app.post("/api/brands/{brand_slug}/posts/{post_id}/publish-now")
 async def publish_post_now(brand_slug: str, post_id: str):
     """Immediately publish a saved content package to Instagram."""

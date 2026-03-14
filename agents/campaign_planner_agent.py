@@ -115,11 +115,24 @@ Always follow the output format requested by the user message exactly."""
         themes = strategy.get("campaign_themes", [])
         current_theme = themes[week - 1] if week <= len(themes) else {"theme": "General"}
 
-        # Posting frequency: prefer strategy output, fall back to brand's stored preference
-        posting_freq = strategy.get('posting_frequency') or brand.get('posting_frequency', {
+        # Posting frequency: prefer brand profile (user-configured), fall back to strategy output
+        posting_freq = brand.get('posting_frequency') or strategy.get('posting_frequency', {
             'reels_per_week': 3, 'carousels_per_week': 2, 'images_per_week': 1, 'stories_per_day': 2
         })
-        content_mix = strategy.get('content_mix') or brand.get('content_mix', {})
+        content_mix = brand.get('content_mix') or strategy.get('content_mix', {})
+
+        # Build list of disallowed types (0% in content_mix or 0 in posting_frequency)
+        disallowed_types = []
+        for ctype, mix_key, freq_key in [
+            ("carousel", "carousels", "carousels_per_week"),
+            ("reel", "reels", "reels_per_week"),
+            ("image", "images", "images_per_week"),
+            ("story", "stories", "stories_per_day"),
+        ]:
+            mix_val = content_mix.get(mix_key, None)
+            freq_val = posting_freq.get(freq_key, None)
+            if mix_val == 0 or freq_val == 0:
+                disallowed_types.append(ctype)
 
         # ── Phase 1: tool calls + JSON-only output ────────────────────────────
         # Claude uses tools to fetch posting times & post-count targets, then
@@ -144,13 +157,21 @@ Always follow the output format requested by the user message exactly."""
         else:
             schedule_scope = f"a detailed 7-day posting schedule for Week {week}"
 
+        disallowed_notice = ""
+        if disallowed_types:
+            disallowed_notice = (
+                f"\n\nCRITICAL CONSTRAINT: The brand has DISABLED these post types: {', '.join(disallowed_types)}. "
+                f"You must NOT create any posts with type set to: {', '.join(disallowed_types)}. "
+                f"Redistribute those slots to the allowed types instead."
+            )
+
         prompt = f"""Create {schedule_scope}.
 
 BRAND: {brand.get('name')}
 WEEK THEME: {json.dumps(current_theme, indent=2)}
 STRATEGY (posting frequency & content mix):
 {json.dumps(posting_freq, indent=2)}
-{json.dumps(content_mix, indent=2)}
+{json.dumps(content_mix, indent=2)}{disallowed_notice}
 
 VIRAL FORMATS FROM TREND RESEARCH (assign one to each post via "trend_format"):
 {json.dumps(viral_formats, indent=2)}
@@ -235,6 +256,15 @@ IMPORTANT: Output ONLY the JSON object. No markdown summary, no tables, no expla
                     post_type = (p.get("type") or "post").lower()
                     p["trend_format"] = type_format_map.get(post_type, format_names[0] if format_names else "General")
 
+        # Enforce disallowed types: convert any disallowed post types to the
+        # best allowed alternative (hard constraint — LLM may still slip)
+        if disallowed_types and plan.get("posts"):
+            allowed = [t for t in ["reel", "image", "carousel", "story"] if t not in disallowed_types]
+            fallback = allowed[0] if allowed else "image"
+            for p in plan["posts"]:
+                if (p.get("type") or "").lower() in disallowed_types:
+                    p["type"] = fallback
+
         # For daily mode: filter to only the target day's posts (safety net
         # in case the LLM still returned multiple days)
         if target_day and plan.get("posts"):
@@ -280,17 +310,23 @@ IMPORTANT: Output ONLY the JSON object. No markdown summary, no tables, no expla
     @staticmethod
     def _calculate_weekly_post_count(inputs: dict) -> dict:
         freq = inputs.get("posting_frequency", {})
-        return {
-            "reels": freq.get("reels_per_week", 3),
-            "carousels": freq.get("carousels_per_week", 2),
-            "images": freq.get("images_per_week", 1),
-            "stories": freq.get("stories_per_day", 2) * 7,
-            "total_feed_posts": (
-                freq.get("reels_per_week", 3)
-                + freq.get("carousels_per_week", 2)
-                + freq.get("images_per_week", 1)
-            ),
+        reels = freq.get("reels_per_week", 0)
+        carousels = freq.get("carousels_per_week", 0)
+        images = freq.get("images_per_week", 0)
+        stories_per_day = freq.get("stories_per_day", 0)
+        result = {
+            "reels": reels,
+            "carousels": carousels,
+            "images": images,
+            "stories": stories_per_day * 7,
+            "total_feed_posts": reels + carousels + images,
         }
+        # Flag types that are explicitly set to 0
+        disabled = [t for t, v in [("reels", reels), ("carousels", carousels), ("images", images), ("stories", stories_per_day)] if v == 0]
+        if disabled:
+            result["disabled_types"] = disabled
+            result["note"] = f"Do NOT create posts of these types: {', '.join(disabled)}"
+        return result
 
     # ── Demo output ────────────────────────────────────────────────────────────
 
