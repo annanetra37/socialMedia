@@ -321,7 +321,7 @@ def _run_cycle_task(job_id: str, brand_slug: str, cycle: str, week: int, day: st
             # Stamp media_url for image posts with selected product photo
             if post_type == "image" and selected_idx is not None:
                 public_url = photo_public_urls.get(selected_idx)
-                visual["media_url"] = public_url or f"/api/brands/{brand_slug}/products/{selected_idx}/image"
+                visual["media_url"] = public_url or f"/api/brands/{brand_slug}/products/{selected_idx}/image.jpg"
 
             store.save_visual(visual, post_id)
             _append_log(job_id, "✓ Visual brief generated")
@@ -582,7 +582,7 @@ async def upload_product_image(brand_slug: str, product_idx: int, request: Reque
     contents = await file.read()
 
     # Build the public URL for this image
-    relative_path = f"/api/brands/{brand_slug}/products/{product_idx}/image"
+    relative_path = f"/api/brands/{brand_slug}/products/{product_idx}/image.jpg"
     base = str(request.base_url).rstrip("/")
     public_url = base + relative_path
 
@@ -601,8 +601,9 @@ async def upload_product_image(brand_slug: str, product_idx: int, request: Reque
 
 
 @app.get("/api/brands/{brand_slug}/products/{product_idx}/image")
+@app.get("/api/brands/{brand_slug}/products/{product_idx}/image.jpg")
 async def serve_product_image(brand_slug: str, product_idx: int):
-    """Serve a product photo."""
+    """Serve a product photo. The .jpg alias exists so Meta Graph API accepts the URL."""
     import os
     from fastapi.responses import Response
     if os.getenv("DATABASE_URL"):
@@ -610,7 +611,11 @@ async def serve_product_image(brand_slug: str, product_idx: int):
         result = get_product_image(brand_slug, product_idx)
         if result:
             data, ct = result
-            return Response(content=data, media_type=ct)
+            return Response(
+                content=data,
+                media_type=ct,
+                headers={"Content-Disposition": f"inline; filename=product_{product_idx}.jpg"},
+            )
     else:
         img_dir = STORAGE_DIR / brand_slug / "product_images"
         for ext in (".jpg", ".png", ".webp"):

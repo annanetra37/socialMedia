@@ -387,7 +387,7 @@ class Orchestrator:
             # Prefer public URL; fall back to relative path (resolved to absolute at publish time).
             if post_type == "image" and selected_idx is not None:
                 public_url = photo_public_urls.get(selected_idx)
-                visual["media_url"] = public_url or f"/api/brands/{self.store.brand_slug}/products/{selected_idx}/image"
+                visual["media_url"] = public_url or f"/api/brands/{self.store.brand_slug}/products/{selected_idx}/image.jpg"
 
             self.store.save_visual(visual, post["id"])
 
