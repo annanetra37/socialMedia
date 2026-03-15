@@ -40,6 +40,32 @@ from api.scheduler import AgencyScheduler as DailyScheduler
 from config.settings import RUN_MODE, BRAND_PROFILES_DIR, STORAGE_DIR
 from storage.data_store import DataStore
 
+# ── Public URL helper ─────────────────────────────────────────────────────────
+def _public_base_url(request: Request) -> str:
+    """Return the public-facing base URL for this server.
+
+    Behind a reverse proxy (Railway, Render, etc.) ``request.base_url`` often
+    returns the internal ``http://0.0.0.0:PORT`` address.  Meta's Graph API
+    needs a publicly reachable HTTPS URL to fetch images from, so we:
+
+    1. Prefer an explicit ``PUBLIC_URL`` env-var (most reliable).
+    2. Reconstruct from ``X-Forwarded-Proto`` / ``X-Forwarded-Host`` headers.
+    3. Fall back to ``request.base_url`` (works for local dev).
+    """
+    import os
+    env_url = os.getenv("PUBLIC_URL", "").rstrip("/")
+    if env_url:
+        return env_url
+
+    proto = request.headers.get("x-forwarded-proto", "").split(",")[0].strip()
+    host = request.headers.get("x-forwarded-host", "").split(",")[0].strip()
+    if proto and host:
+        return f"{proto}://{host}"
+
+    # Last resort – fine for local dev, won't work behind a proxy
+    return str(request.base_url).rstrip("/")
+
+
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(
     title="AI Social Media OS",
@@ -583,7 +609,7 @@ async def upload_product_image(brand_slug: str, product_idx: int, request: Reque
 
     # Build the public URL for this image
     relative_path = f"/api/brands/{brand_slug}/products/{product_idx}/image.jpg"
-    base = str(request.base_url).rstrip("/")
+    base = _public_base_url(request)
     public_url = base + relative_path
 
     if os.getenv("DATABASE_URL"):
@@ -978,11 +1004,13 @@ async def publish_post_now(brand_slug: str, post_id: str, request: Request):
 
     # Resolve relative URLs to absolute using server's public base URL
     if media_url and not media_url.startswith(("http://", "https://")):
-        base = str(request.base_url).rstrip("/")
+        base = _public_base_url(request)
         media_url = base + media_url
 
     api = InstagramAPI(brand)
-    _glog(f"Publish: brand='{brand_slug}' account_id='{api.account_id}' has_creds={api._has_credentials} media_url='{media_url[:80]}…'")
+    _glog(f"Publish: brand='{brand_slug}' account_id='{api.account_id}' has_creds={api._has_credentials} media_url='{media_url}'")
+    if not media_url:
+        return {"post_id": post_id, "brand_slug": brand_slug, "result": {"status": "error", "detail": "No media URL available. Re-generate the post first."}}
     result = api.schedule_post({
         "post_id": post_id,
         "caption": caption.strip(),
@@ -1156,7 +1184,7 @@ async def oauth_connect(brand_slug: str, request: Request):
             status_code=400,
             detail="META_APP_ID is not set. Add it to your .env file first."
         )
-    redirect_uri = str(request.base_url).rstrip("/") + "/api/oauth/callback"
+    redirect_uri = _public_base_url(request) + "/api/oauth/callback"
     url = get_oauth_url(brand_slug, redirect_uri)
     _glog(f"OAuth flow started for brand='{brand_slug}'")
     return RedirectResponse(url)
@@ -1192,7 +1220,7 @@ async def oauth_callback(request: Request):
         return RedirectResponse("/?oauth=error&msg=missing_code_or_state")
 
     brand_slug = state
-    redirect_uri = str(request.base_url).rstrip("/") + "/api/oauth/callback"
+    redirect_uri = _public_base_url(request) + "/api/oauth/callback"
 
     try:
         from api.oauth import exchange_code_for_token, fetch_instagram_account, save_credentials_to_brand
