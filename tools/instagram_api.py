@@ -94,8 +94,15 @@ class InstagramAPI:
             if is_carousel_item:
                 payload["is_carousel_item"] = True
 
+        # Log what we're sending to Meta (redact token)
+        _debug = {k: v for k, v in payload.items() if k != "access_token"}
+        print(f"[InstagramAPI] create_media_container → POST {endpoint}")
+        print(f"[InstagramAPI] payload (sans token): {_debug}")
+
         resp = requests.post(endpoint, data=payload, timeout=60)
-        return resp.json()
+        result = resp.json()
+        print(f"[InstagramAPI] Meta response ({resp.status_code}): {json.dumps(result)}")
+        return result
 
     def publish_media(self, container_id: str) -> dict:
         """Publish a media container (step 2 of 2-step publishing)."""

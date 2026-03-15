@@ -1034,10 +1034,12 @@ async def publish_post_now(brand_slug: str, post_id: str, request: Request):
     # for image posts with product photos, so this should just work.
     visual = store.load("visuals", f"{post_id}.json") or {}
     media_url = visual.get("media_url") or ""
+    _glog(f"[publish-debug] step1 visual.media_url = '{media_url}'")
 
     # Fallback: DALL-E generated URL
     if not media_url:
         media_url = visual.get("primary_image", {}).get("generated_url", "")
+        _glog(f"[publish-debug] step2 dall-e fallback = '{media_url}'")
 
     # Fallback: look up public_url from product_images DB
     if not media_url:
@@ -1046,29 +1048,28 @@ async def publish_post_now(brand_slug: str, post_id: str, request: Request):
         if selected_idx is not None and os.getenv("DATABASE_URL"):
             from storage.database import get_product_image_public_url
             media_url = get_product_image_public_url(brand_slug, int(selected_idx)) or ""
+            _glog(f"[publish-debug] step3 db public_url = '{media_url}'")
 
     # ── Normalise media_url to a publicly reachable HTTPS address ─────────
-    # Stored URLs may contain stale internal addresses (http://0.0.0.0:PORT,
-    # http://localhost, etc.) from previous uploads/generations.  Strip any
-    # URL that points to our own /api/ path back to relative, then re-derive
-    # the absolute URL using the current public base.
     import re
     if media_url:
-        # Strip any scheme+host prefix that sits before /api/ (our own route)
         m = re.search(r"(/api/brands/.+)$", media_url)
         if m:
             media_url = m.group(1)
-        # Ensure .jpg extension for Meta compatibility (old data may lack it)
+            _glog(f"[publish-debug] step4 stripped to relative = '{media_url}'")
         if media_url.startswith("/api/brands/") and "/image" in media_url and not media_url.endswith((".jpg", ".png", ".webp")):
             media_url = media_url.rstrip("/") + ".jpg"
+            _glog(f"[publish-debug] step5 added .jpg = '{media_url}'")
 
     if media_url and not media_url.startswith(("http://", "https://")):
         base = _public_base_url(request)
+        _glog(f"[publish-debug] step6 public_base = '{base}'")
         media_url = base + media_url
 
     # Final safety check: Meta requires https
     if media_url and media_url.startswith("http://"):
         media_url = "https://" + media_url[7:]
+    _glog(f"[publish-debug] FINAL media_url = '{media_url}'")
 
     api = InstagramAPI(brand)
     _glog(f"Publish: brand='{brand_slug}' account_id='{api.account_id}' has_creds={api._has_credentials} media_url='{media_url}'")
