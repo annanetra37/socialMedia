@@ -1035,82 +1035,70 @@ async def publish_post_now(brand_slug: str, post_id: str, request: Request):
     if ht:
         caption = caption.strip() + "\n\n" + ht
 
-    # Get media URL from visuals — orchestrator stamps media_url directly
-    # for image posts with product photos, so this should just work.
+    # ── Resolve image bytes for publishing ───────────────────────────────
+    # Meta's Graph API requires a *publicly reachable* image URL.  PaaS
+    # hosts like Railway are often unreachable from Meta's crawlers (bot-
+    # blocking, cold-start timeouts, etc.).  So instead of giving Meta our
+    # own Railway URL, we upload the raw image bytes to telegra.ph (free,
+    # no API key, CDN-backed) and hand Meta that URL.  This mirrors what
+    # the user's local script did — give Meta a URL it can always reach.
+    import os
+    media_url = ""
+    img_bytes: bytes | None = None
+
+    # 1) Try to get raw image bytes from the DB (most reliable source)
+    selected_idx = content.get("selected_product_idx")
+    if selected_idx is not None and os.getenv("DATABASE_URL"):
+        from storage.database import get_product_image
+        db_result = get_product_image(brand_slug, int(selected_idx))
+        if db_result:
+            img_bytes = bytes(db_result[0])
+            _glog(f"[publish] got {len(img_bytes)} bytes from DB for product {selected_idx}")
+
+    # 2) Fallback: try DALL-E URL from visuals
     visual = store.load("visuals", f"{post_id}.json") or {}
-    media_url = visual.get("media_url") or ""
-    _glog(f"[publish-debug] step1 visual.media_url = '{media_url}'")
+    if not img_bytes:
+        dalle_url = visual.get("primary_image", {}).get("generated_url", "")
+        if dalle_url and dalle_url.startswith("https://"):
+            media_url = dalle_url
+            _glog(f"[publish] using DALL-E URL directly: {media_url}")
 
-    # Fallback: DALL-E generated URL
-    if not media_url:
-        media_url = visual.get("primary_image", {}).get("generated_url", "")
-        _glog(f"[publish-debug] step2 dall-e fallback = '{media_url}'")
-
-    # Fallback: look up public_url from product_images DB
-    if not media_url:
-        import os
-        selected_idx = content.get("selected_product_idx")
-        if selected_idx is not None and os.getenv("DATABASE_URL"):
-            from storage.database import get_product_image_public_url
-            media_url = get_product_image_public_url(brand_slug, int(selected_idx)) or ""
-            _glog(f"[publish-debug] step3 db public_url = '{media_url}'")
-
-    # ── Normalise media_url to a publicly reachable HTTPS address ─────────
-    import re
-    if media_url:
-        m = re.search(r"(/api/brands/.+)$", media_url)
-        if m:
-            media_url = m.group(1)
-            _glog(f"[publish-debug] step4 stripped to relative = '{media_url}'")
-        if media_url.startswith("/api/brands/") and "/image" in media_url and not media_url.endswith((".jpg", ".png", ".webp")):
-            media_url = media_url.rstrip("/") + ".jpg"
-            _glog(f"[publish-debug] step5 added .jpg = '{media_url}'")
-
-    if media_url and not media_url.startswith(("http://", "https://")):
-        base = _public_base_url(request)
-        _glog(f"[publish-debug] step6 public_base = '{base}'")
-        media_url = base + media_url
-
-    # Final safety check: Meta requires https
-    if media_url and media_url.startswith("http://"):
-        media_url = "https://" + media_url[7:]
-
-    # Add cache-busting param so Meta doesn't serve a cached failure from
-    # previous attempts with a different URL or when the server was cold.
-    if media_url and "?" not in media_url:
-        media_url = media_url + f"?_v={int(time.time())}"
-    _glog(f"[publish-debug] FINAL media_url = '{media_url}'")
-
-    # ── If IMGBB_API_KEY is set, upload the image there instead ──────────
-    # Meta's crawler often cannot reach PaaS hosts (Railway, Render, etc.)
-    # due to timeouts, bot-blocking, or cached failures.  Uploading to a
-    # dedicated image host guarantees a URL that Meta can always fetch.
-    import os, base64
-    imgbb_key = os.getenv("IMGBB_API_KEY")
-    if imgbb_key and media_url:
+    # 3) Upload raw bytes to telegra.ph so Meta gets a reachable URL
+    if img_bytes:
         try:
-            # Grab the raw image bytes from our own DB
-            if os.getenv("DATABASE_URL"):
-                from storage.database import get_product_image
-                selected_idx = content.get("selected_product_idx")
-                if selected_idx is not None:
-                    result = get_product_image(brand_slug, int(selected_idx))
-                    if result:
-                        img_data, _ct = result
-                        img_b64 = base64.b64encode(bytes(img_data)).decode()
-                        resp = requests.post(
-                            "https://api.imgbb.com/1/upload",
-                            data={"key": imgbb_key, "image": img_b64},
-                            timeout=30,
-                        )
-                        if resp.status_code == 200:
-                            imgbb_url = resp.json()["data"]["url"]
-                            _glog(f"[publish-debug] imgbb upload OK → {imgbb_url}")
-                            media_url = imgbb_url
-                        else:
-                            _glog(f"[publish-debug] imgbb upload failed: {resp.status_code} {resp.text[:200]}")
+            telegraph_resp = requests.post(
+                "https://telegra.ph/upload",
+                files={"file": ("image.jpg", img_bytes, "image/jpeg")},
+                timeout=30,
+            )
+            if telegraph_resp.status_code == 200:
+                tg_data = telegraph_resp.json()
+                if isinstance(tg_data, list) and tg_data and "src" in tg_data[0]:
+                    media_url = "https://telegra.ph" + tg_data[0]["src"]
+                    _glog(f"[publish] telegra.ph upload OK → {media_url}")
+                else:
+                    _glog(f"[publish] telegra.ph unexpected response: {tg_data}")
+            else:
+                _glog(f"[publish] telegra.ph upload failed: {telegraph_resp.status_code} {telegraph_resp.text[:200]}")
         except Exception as e:
-            _glog(f"[publish-debug] imgbb upload error: {e}")
+            _glog(f"[publish] telegra.ph upload error: {e}")
+
+    # 4) Last-resort fallback: our own Railway URL (may not work with Meta)
+    if not media_url:
+        media_url = visual.get("media_url") or ""
+        if not media_url and selected_idx is not None:
+            media_url = f"/api/brands/{brand_slug}/products/{int(selected_idx)}/image.jpg"
+        import re
+        if media_url:
+            m = re.search(r"(/api/brands/.+)$", media_url)
+            if m:
+                media_url = m.group(1)
+        if media_url and not media_url.startswith(("http://", "https://")):
+            media_url = _public_base_url(request) + media_url
+        if media_url and media_url.startswith("http://"):
+            media_url = "https://" + media_url[7:]
+        if media_url:
+            _glog(f"[publish] WARNING: falling back to Railway URL (Meta may not reach it): {media_url}")
 
     api = InstagramAPI(brand)
     _glog(f"Publish: brand='{brand_slug}' account_id='{api.account_id}' has_creds={api._has_credentials} media_url='{media_url}'")
