@@ -1074,25 +1074,43 @@ async def publish_post_now(brand_slug: str, post_id: str, request: Request):
     # Final safety check: Meta requires https
     if media_url and media_url.startswith("http://"):
         media_url = "https://" + media_url[7:]
+
+    # Add cache-busting param so Meta doesn't serve a cached failure from
+    # previous attempts with a different URL or when the server was cold.
+    if media_url and "?" not in media_url:
+        media_url = media_url + f"?_v={int(time.time())}"
     _glog(f"[publish-debug] FINAL media_url = '{media_url}'")
 
-    # Pre-warm: fetch the image URL ourselves so Railway instance is hot when
-    # Meta's crawler arrives (cold-start timeout is the #1 cause of "media
-    # could not be fetched" errors on PaaS platforms).
-    if media_url:
+    # ── If IMGBB_API_KEY is set, upload the image there instead ──────────
+    # Meta's crawler often cannot reach PaaS hosts (Railway, Render, etc.)
+    # due to timeouts, bot-blocking, or cached failures.  Uploading to a
+    # dedicated image host guarantees a URL that Meta can always fetch.
+    import os, base64
+    imgbb_key = os.getenv("IMGBB_API_KEY")
+    if imgbb_key and media_url:
         try:
-            _warm = requests.head(media_url, timeout=15, allow_redirects=True)
-            _glog(f"[publish-debug] pre-warm HEAD {media_url} → {_warm.status_code} "
-                   f"content-type={_warm.headers.get('content-type')} "
-                   f"content-length={_warm.headers.get('content-length')}")
-            if _warm.status_code != 200:
-                # Retry with GET in case HEAD is not supported
-                _warm = requests.get(media_url, timeout=15, allow_redirects=True)
-                _glog(f"[publish-debug] pre-warm GET fallback → {_warm.status_code} "
-                       f"content-type={_warm.headers.get('content-type')} "
-                       f"len={len(_warm.content)}")
+            # Grab the raw image bytes from our own DB
+            if os.getenv("DATABASE_URL"):
+                from storage.database import get_product_image
+                selected_idx = content.get("selected_product_idx")
+                if selected_idx is not None:
+                    result = get_product_image(brand_slug, int(selected_idx))
+                    if result:
+                        img_data, _ct = result
+                        img_b64 = base64.b64encode(bytes(img_data)).decode()
+                        resp = requests.post(
+                            "https://api.imgbb.com/1/upload",
+                            data={"key": imgbb_key, "image": img_b64},
+                            timeout=30,
+                        )
+                        if resp.status_code == 200:
+                            imgbb_url = resp.json()["data"]["url"]
+                            _glog(f"[publish-debug] imgbb upload OK → {imgbb_url}")
+                            media_url = imgbb_url
+                        else:
+                            _glog(f"[publish-debug] imgbb upload failed: {resp.status_code} {resp.text[:200]}")
         except Exception as e:
-            _glog(f"[publish-debug] pre-warm FAILED: {e}")
+            _glog(f"[publish-debug] imgbb upload error: {e}")
 
     api = InstagramAPI(brand)
     _glog(f"Publish: brand='{brand_slug}' account_id='{api.account_id}' has_creds={api._has_credentials} media_url='{media_url}'")
