@@ -1039,23 +1039,31 @@ async def publish_post_now(brand_slug: str, post_id: str, request: Request):
         caption = caption.strip() + "\n\n" + ht
 
     # ── Image URL ─────────────────────────────────────────────────────────
-    # Build the EXACT same URL format that worked in the local script:
-    #   https://{host}/api/brands/{slug}/products/{idx}/image
+    # Meta Graph API requires a publicly reachable URL with an image extension.
+    # Use _public_base_url() for correct proxy-aware URL and .jpg extension.
     selected_idx = content.get("selected_product_idx")
     print(f"[publish-now] selected_product_idx={selected_idx} type={type(selected_idx).__name__}")
 
     image_url = ""
     if selected_idx is not None:
-        host = request.headers.get("host", "")
-        image_url = f"https://{host}/api/brands/{brand_slug}/products/{int(selected_idx)}/image"
-        print(f"[publish-now] image_url={image_url}")
+        # First, try the stored public_url from the database (set at upload time)
+        if os.getenv("DATABASE_URL"):
+            from storage.database import get_product_image_public_url
+            image_url = get_product_image_public_url(brand_slug, int(selected_idx)) or ""
+            if image_url:
+                print(f"[publish-now] image_url (from db public_url)={image_url}")
+        # Fallback: build URL using _public_base_url helper + .jpg extension
+        if not image_url:
+            base = _public_base_url(request)
+            image_url = f"{base}/api/brands/{brand_slug}/products/{int(selected_idx)}/image.jpg"
+            print(f"[publish-now] image_url (constructed)={image_url}")
     else:
         # Try visuals media_url
         visual = store.load("visuals", f"{post_id}.json") or {}
         image_url = visual.get("media_url", "")
         if image_url and not image_url.startswith("http"):
-            host = request.headers.get("host", "")
-            image_url = f"https://{host}{image_url}"
+            base = _public_base_url(request)
+            image_url = f"{base}{image_url}"
         print(f"[publish-now] fallback image_url from visuals={image_url}")
 
     if not image_url:
