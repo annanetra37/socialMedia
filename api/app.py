@@ -1011,24 +1011,19 @@ async def update_campaign_post(brand_slug: str, post_id: str, request: Request):
 
 @app.post("/api/brands/{brand_slug}/posts/{post_id}/publish-now")
 async def publish_post_now(brand_slug: str, post_id: str, request: Request):
-    """
-    Immediately publish a saved content package to Instagram.
-
-    Mirrors the proven two-step flow that works locally:
-      1. POST /{ig_user_id}/media  with image_url + caption  → container id
-      2. sleep(5)
-      3. POST /{ig_user_id}/media_publish  with creation_id  → published
-    """
+    """Publish to Instagram — exact same logic as the working local script."""
     import json, os, time
+
+    _glog(f"[publish-now] >>>>>> CALLED brand={brand_slug} post={post_id}")
 
     brand = _load_brand(brand_slug)
     store = DataStore.from_slug(brand_slug)
 
     content = store.load("content", f"{post_id}.json")
     if not content:
-        raise HTTPException(status_code=404, detail=f"No content package for '{post_id}'. Run a content cycle first.")
+        raise HTTPException(status_code=404, detail=f"No content package for '{post_id}'.")
 
-    # ── Build caption ─────────────────────────────────────────────────────
+    # ── Caption ───────────────────────────────────────────────────────────
     caption_data = content.get("caption", {})
     if isinstance(caption_data, dict):
         caption = caption_data.get("full_caption") or "\n\n".join(
@@ -1037,137 +1032,111 @@ async def publish_post_now(brand_slug: str, post_id: str, request: Request):
     else:
         caption = str(caption_data)
 
+    # Only append hashtags if full_caption doesn't already contain them
     hashtags = content.get("hashtags", {})
     ht = hashtags.get("full_set", "") if isinstance(hashtags, dict) else (" ".join(hashtags) if isinstance(hashtags, list) else "")
-    if ht:
+    if ht and ht.split()[0] not in caption:
         caption = caption.strip() + "\n\n" + ht
 
-    # ── Resolve image URL ─────────────────────────────────────────────────
-    # Strategy (in order):
-    #   A) Upload DB image bytes to telegra.ph → guaranteed reachable CDN URL
-    #   B) Use our Railway /image endpoint (exact format proven to work:
-    #      /api/brands/{slug}/products/{idx}/image  — NO .jpg suffix)
-    #   C) DALL-E generated URL from visuals
+    # ── Image URL ─────────────────────────────────────────────────────────
+    # Build the EXACT same URL format that worked in the local script:
+    #   https://{host}/api/brands/{slug}/products/{idx}/image
     selected_idx = content.get("selected_product_idx")
-    visual = store.load("visuals", f"{post_id}.json") or {}
-    media_url = ""
+    _glog(f"[publish-now] selected_product_idx={selected_idx} type={type(selected_idx).__name__}")
 
-    # --- Strategy A: telegra.ph upload (most reliable) ---
-    if selected_idx is not None and os.getenv("DATABASE_URL"):
-        try:
-            from storage.database import get_product_image
-            db_result = get_product_image(brand_slug, int(selected_idx))
-            if db_result:
-                img_bytes = bytes(db_result[0])
-                _glog(f"[publish] got {len(img_bytes)} bytes from DB for product {selected_idx}")
-                tg_resp = requests.post(
-                    "https://telegra.ph/upload",
-                    files={"file": ("image.jpg", img_bytes, "image/jpeg")},
-                    timeout=30,
-                )
-                if tg_resp.status_code == 200:
-                    tg_data = tg_resp.json()
-                    if isinstance(tg_data, list) and tg_data and "src" in tg_data[0]:
-                        media_url = "https://telegra.ph" + tg_data[0]["src"]
-                        _glog(f"[publish] telegra.ph upload OK → {media_url}")
-                    else:
-                        _glog(f"[publish] telegra.ph unexpected response: {tg_data}")
-                else:
-                    _glog(f"[publish] telegra.ph failed ({tg_resp.status_code}): {tg_resp.text[:200]}")
-        except Exception as e:
-            _glog(f"[publish] telegra.ph error: {e}")
+    image_url = ""
+    if selected_idx is not None:
+        host = request.headers.get("host", "")
+        image_url = f"https://{host}/api/brands/{brand_slug}/products/{int(selected_idx)}/image"
+        _glog(f"[publish-now] image_url={image_url}")
+    else:
+        # Try visuals media_url
+        visual = store.load("visuals", f"{post_id}.json") or {}
+        image_url = visual.get("media_url", "")
+        if image_url and not image_url.startswith("http"):
+            host = request.headers.get("host", "")
+            image_url = f"https://{host}{image_url}"
+        _glog(f"[publish-now] fallback image_url from visuals={image_url}")
 
-    # --- Strategy B: Railway public URL (proven format, no .jpg suffix) ---
-    if not media_url and selected_idx is not None:
-        base = _public_base_url(request)
-        media_url = f"{base}/api/brands/{brand_slug}/products/{int(selected_idx)}/image"
-        if media_url.startswith("http://"):
-            media_url = "https://" + media_url[7:]
-        _glog(f"[publish] using Railway URL: {media_url}")
-
-    # --- Strategy C: DALL-E URL ---
-    if not media_url:
-        dalle_url = visual.get("primary_image", {}).get("generated_url", "")
-        if dalle_url and dalle_url.startswith("https://"):
-            media_url = dalle_url
-            _glog(f"[publish] using DALL-E URL: {media_url}")
-
-    if not media_url:
+    if not image_url:
         return {"post_id": post_id, "brand_slug": brand_slug,
-                "result": {"status": "error", "detail": "No media URL available. Re-generate the post first."}}
+                "result": {"status": "error", "detail": "No image URL. selected_product_idx is missing from content."}}
 
-    # ── Read Meta credentials ─────────────────────────────────────────────
-    from tools.instagram_api import InstagramAPI
-    api = InstagramAPI(brand)
-    _glog(f"[publish] brand='{brand_slug}' account='{api.account_id}' has_creds={api._has_credentials} url='{media_url}'")
+    # ── Meta credentials ──────────────────────────────────────────────────
+    creds = brand.get("meta_credentials") or {}
+    access_token = creds.get("access_token") or os.getenv("META_ACCESS_TOKEN", "")
+    account_id = (creds.get("instagram_account_id")
+                  or creds.get("instagram_business_account_id")
+                  or os.getenv("INSTAGRAM_BUSINESS_ACCOUNT_ID", ""))
 
-    if not api._has_credentials:
+    _glog(f"[publish-now] account_id={account_id} has_token={bool(access_token)}")
+
+    if not access_token or not account_id:
         return {"post_id": post_id, "brand_slug": brand_slug,
-                "result": {"status": "error", "detail": "No Instagram credentials configured for this brand."}}
+                "result": {"status": "error", "detail": "No Instagram credentials."}}
 
-    # ── Two-step publish (matches the proven local script exactly) ─────────
+    # ── STEP 1: Create media container (EXACTLY like the working script) ──
+    payload = {
+        'image_url': image_url,
+        'caption': caption.strip(),
+        'access_token': access_token,
+    }
+    create_url = f"https://graph.facebook.com/v19.0/{account_id}/media"
+
+    _glog(f"[publish-now] STEP1 POST {create_url}")
+    _glog(f"[publish-now] STEP1 image_url={image_url}")
+    _glog(f"[publish-now] STEP1 caption_length={len(caption)}")
+
     try:
-        # STEP 1: Create media container
-        post_type = (content.get("post_type") or "image").lower()
-        container_payload = {
-            "caption": caption.strip(),
-            "access_token": api.access_token,
-        }
-        if post_type in ("video", "reel", "reels"):
-            container_payload["video_url"] = media_url
-            container_payload["media_type"] = "REELS"
-        else:
-            container_payload["image_url"] = media_url
-
-        create_url = f"https://graph.facebook.com/v19.0/{api.account_id}/media"
-        _debug = {k: v for k, v in container_payload.items() if k != "access_token"}
-        _glog(f"[publish] STEP 1 → POST {create_url}")
-        _glog(f"[publish] payload (sans token): {_debug}")
-
-        resp1 = requests.post(create_url, data=container_payload, timeout=60)
-        result1 = resp1.json()
-        _glog(f"[publish] STEP 1 response ({resp1.status_code}): {json.dumps(result1)}")
-
-        container_id = result1.get("id")
-        if not container_id:
-            err = result1.get("error", {})
-            detail = err.get("error_user_msg") or err.get("message") or json.dumps(result1)
-            return {"post_id": post_id, "brand_slug": brand_slug,
-                    "result": {"status": "error", "detail": detail,
-                               "attempted_url": media_url,
-                               "strategy_used": "telegra.ph" if "telegra.ph" in media_url else "railway" if "railway" in media_url.lower() else "other"}}
-
-        # STEP 2: Wait for Meta to process the media
-        _glog(f"[publish] STEP 2 → sleeping 5s for Meta to process container {container_id}")
-        time.sleep(5)
-
-        # STEP 3: Publish the container
-        publish_url = f"https://graph.facebook.com/v19.0/{api.account_id}/media_publish"
-        publish_payload = {
-            "creation_id": container_id,
-            "access_token": api.access_token,
-        }
-        _glog(f"[publish] STEP 3 → POST {publish_url}")
-
-        resp2 = requests.post(publish_url, data=publish_payload, timeout=60)
-        result2 = resp2.json()
-        _glog(f"[publish] STEP 3 response ({resp2.status_code}): {json.dumps(result2)}")
-
-        if result2.get("id"):
-            result2["status"] = "published"
-            _glog(f"[publish] SUCCESS! Post published: {result2['id']}")
-        else:
-            err = result2.get("error", {})
-            detail = err.get("message") or json.dumps(result2)
-            result2 = {"status": "error", "detail": detail}
-            _glog(f"[publish] FAILED at publish step: {detail}")
-
-        return {"post_id": post_id, "brand_slug": brand_slug, "result": result2}
-
+        resp = requests.post(create_url, data=payload)
+        result = resp.json()
+        _glog(f"[publish-now] STEP1 response ({resp.status_code}): {json.dumps(result)}")
     except Exception as e:
-        _glog(f"[publish] exception: {e}")
+        _glog(f"[publish-now] STEP1 exception: {e}")
         return {"post_id": post_id, "brand_slug": brand_slug,
-                "result": {"status": "error", "detail": str(e)}}
+                "result": {"status": "error", "detail": f"Meta API error: {e}"}}
+
+    if 'id' not in result:
+        err = result.get("error", {})
+        return {"post_id": post_id, "brand_slug": brand_slug,
+                "result": {"status": "error",
+                           "detail": err.get("error_user_msg") or err.get("message") or json.dumps(result),
+                           "image_url_sent": image_url}}
+
+    container_id = result['id']
+    _glog(f"[publish-now] STEP1 OK container_id={container_id}")
+
+    # ── STEP 2: Wait (exactly like the working script) ────────────────────
+    time.sleep(5)
+
+    # ── STEP 3: Publish (exactly like the working script) ─────────────────
+    publish_url = f"https://graph.facebook.com/v19.0/{account_id}/media_publish"
+    publish_payload = {
+        'creation_id': container_id,
+        'access_token': access_token,
+    }
+
+    _glog(f"[publish-now] STEP3 POST {publish_url}")
+
+    try:
+        resp2 = requests.post(publish_url, data=publish_payload)
+        result2 = resp2.json()
+        _glog(f"[publish-now] STEP3 response ({resp2.status_code}): {json.dumps(result2)}")
+    except Exception as e:
+        _glog(f"[publish-now] STEP3 exception: {e}")
+        return {"post_id": post_id, "brand_slug": brand_slug,
+                "result": {"status": "error", "detail": f"Publish step failed: {e}"}}
+
+    if result2.get("id"):
+        _glog(f"[publish-now] SUCCESS post_id={result2['id']}")
+        return {"post_id": post_id, "brand_slug": brand_slug,
+                "result": {"status": "published", "id": result2["id"]}}
+    else:
+        err = result2.get("error", {})
+        detail = err.get("message") or json.dumps(result2)
+        _glog(f"[publish-now] STEP3 FAILED: {detail}")
+        return {"post_id": post_id, "brand_slug": brand_slug,
+                "result": {"status": "error", "detail": detail}}
 
 
 @app.get("/api/brands/{brand_slug}/posts/{post_id}/publish-debug")
