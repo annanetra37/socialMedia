@@ -1014,7 +1014,7 @@ async def publish_post_now(brand_slug: str, post_id: str, request: Request):
     """Publish to Instagram — exact same logic as the working local script."""
     import json, os, time
 
-    _glog(f"[publish-now] >>>>>> CALLED brand={brand_slug} post={post_id}")
+    print(f"[publish-now] >>>>>> CALLED brand={brand_slug} post={post_id}")
 
     brand = _load_brand(brand_slug)
     store = DataStore.from_slug(brand_slug)
@@ -1042,13 +1042,13 @@ async def publish_post_now(brand_slug: str, post_id: str, request: Request):
     # Build the EXACT same URL format that worked in the local script:
     #   https://{host}/api/brands/{slug}/products/{idx}/image
     selected_idx = content.get("selected_product_idx")
-    _glog(f"[publish-now] selected_product_idx={selected_idx} type={type(selected_idx).__name__}")
+    print(f"[publish-now] selected_product_idx={selected_idx} type={type(selected_idx).__name__}")
 
     image_url = ""
     if selected_idx is not None:
         host = request.headers.get("host", "")
         image_url = f"https://{host}/api/brands/{brand_slug}/products/{int(selected_idx)}/image"
-        _glog(f"[publish-now] image_url={image_url}")
+        print(f"[publish-now] image_url={image_url}")
     else:
         # Try visuals media_url
         visual = store.load("visuals", f"{post_id}.json") or {}
@@ -1056,7 +1056,7 @@ async def publish_post_now(brand_slug: str, post_id: str, request: Request):
         if image_url and not image_url.startswith("http"):
             host = request.headers.get("host", "")
             image_url = f"https://{host}{image_url}"
-        _glog(f"[publish-now] fallback image_url from visuals={image_url}")
+        print(f"[publish-now] fallback image_url from visuals={image_url}")
 
     if not image_url:
         return {"post_id": post_id, "brand_slug": brand_slug,
@@ -1069,7 +1069,7 @@ async def publish_post_now(brand_slug: str, post_id: str, request: Request):
                   or creds.get("instagram_business_account_id")
                   or os.getenv("INSTAGRAM_BUSINESS_ACCOUNT_ID", ""))
 
-    _glog(f"[publish-now] account_id={account_id} has_token={bool(access_token)}")
+    print(f"[publish-now] account_id={account_id} has_token={bool(access_token)}")
 
     if not access_token or not account_id:
         return {"post_id": post_id, "brand_slug": brand_slug,
@@ -1083,16 +1083,16 @@ async def publish_post_now(brand_slug: str, post_id: str, request: Request):
     }
     create_url = f"https://graph.facebook.com/v19.0/{account_id}/media"
 
-    _glog(f"[publish-now] STEP1 POST {create_url}")
-    _glog(f"[publish-now] STEP1 image_url={image_url}")
-    _glog(f"[publish-now] STEP1 caption_length={len(caption)}")
+    print(f"[publish-now] STEP1 POST {create_url}")
+    print(f"[publish-now] STEP1 image_url={image_url}")
+    print(f"[publish-now] STEP1 caption_length={len(caption)}")
 
     try:
         resp = requests.post(create_url, data=payload)
         result = resp.json()
-        _glog(f"[publish-now] STEP1 response ({resp.status_code}): {json.dumps(result)}")
+        print(f"[publish-now] STEP1 response ({resp.status_code}): {json.dumps(result)}")
     except Exception as e:
-        _glog(f"[publish-now] STEP1 exception: {e}")
+        print(f"[publish-now] STEP1 exception: {e}")
         return {"post_id": post_id, "brand_slug": brand_slug,
                 "result": {"status": "error", "detail": f"Meta API error: {e}"}}
 
@@ -1104,7 +1104,7 @@ async def publish_post_now(brand_slug: str, post_id: str, request: Request):
                            "image_url_sent": image_url}}
 
     container_id = result['id']
-    _glog(f"[publish-now] STEP1 OK container_id={container_id}")
+    print(f"[publish-now] STEP1 OK container_id={container_id}")
 
     # ── STEP 2: Wait (exactly like the working script) ────────────────────
     time.sleep(5)
@@ -1116,25 +1116,25 @@ async def publish_post_now(brand_slug: str, post_id: str, request: Request):
         'access_token': access_token,
     }
 
-    _glog(f"[publish-now] STEP3 POST {publish_url}")
+    print(f"[publish-now] STEP3 POST {publish_url}")
 
     try:
         resp2 = requests.post(publish_url, data=publish_payload)
         result2 = resp2.json()
-        _glog(f"[publish-now] STEP3 response ({resp2.status_code}): {json.dumps(result2)}")
+        print(f"[publish-now] STEP3 response ({resp2.status_code}): {json.dumps(result2)}")
     except Exception as e:
-        _glog(f"[publish-now] STEP3 exception: {e}")
+        print(f"[publish-now] STEP3 exception: {e}")
         return {"post_id": post_id, "brand_slug": brand_slug,
                 "result": {"status": "error", "detail": f"Publish step failed: {e}"}}
 
     if result2.get("id"):
-        _glog(f"[publish-now] SUCCESS post_id={result2['id']}")
+        print(f"[publish-now] SUCCESS post_id={result2['id']}")
         return {"post_id": post_id, "brand_slug": brand_slug,
                 "result": {"status": "published", "id": result2["id"]}}
     else:
         err = result2.get("error", {})
         detail = err.get("message") or json.dumps(result2)
-        _glog(f"[publish-now] STEP3 FAILED: {detail}")
+        print(f"[publish-now] STEP3 FAILED: {detail}")
         return {"post_id": post_id, "brand_slug": brand_slug,
                 "result": {"status": "error", "detail": detail}}
 
