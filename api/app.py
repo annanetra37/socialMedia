@@ -637,10 +637,18 @@ async def serve_product_image(brand_slug: str, product_idx: int):
         result = get_product_image(brand_slug, product_idx)
         if result:
             data, ct = result
+            data = bytes(data)  # ensure bytes, not memoryview
+            # Meta requires a recognisable image content-type
+            if not ct or not ct.startswith("image/"):
+                ct = "image/jpeg"
             return Response(
                 content=data,
                 media_type=ct,
-                headers={"Content-Disposition": f"inline; filename=product_{product_idx}.jpg"},
+                headers={
+                    "Content-Length": str(len(data)),
+                    "Content-Disposition": f"inline; filename=product_{product_idx}.jpg",
+                    "Cache-Control": "public, max-age=86400",
+                },
             )
     else:
         img_dir = STORAGE_DIR / brand_slug / "product_images"
@@ -649,6 +657,43 @@ async def serve_product_image(brand_slug: str, product_idx: int):
             if p.exists():
                 return FileResponse(str(p))
     raise HTTPException(status_code=404, detail="No image found")
+
+
+@app.get("/api/brands/{brand_slug}/products/{product_idx}/image-debug")
+async def debug_product_image(brand_slug: str, product_idx: int):
+    """Debug endpoint: inspect stored image metadata without serving the full image."""
+    import os
+    info: dict = {"brand_slug": brand_slug, "product_idx": product_idx}
+    if os.getenv("DATABASE_URL"):
+        from storage.database import get_product_image
+        result = get_product_image(brand_slug, product_idx)
+        if result:
+            data, ct = result
+            data = bytes(data)
+            # Check if bytes look like a real image
+            is_jpeg = data[:2] == b'\xff\xd8'
+            is_png = data[:4] == b'\x89PNG'
+            info.update({
+                "source": "database",
+                "content_type": ct,
+                "size_bytes": len(data),
+                "looks_like_jpeg": is_jpeg,
+                "looks_like_png": is_png,
+                "first_16_bytes_hex": data[:16].hex(),
+            })
+        else:
+            info["error"] = "No image found in database"
+    else:
+        info["source"] = "filesystem"
+        img_dir = STORAGE_DIR / brand_slug / "product_images"
+        for ext in (".jpg", ".png", ".webp"):
+            p = img_dir / f"{product_idx}{ext}"
+            if p.exists():
+                info.update({"file": str(p), "size_bytes": p.stat().st_size})
+                break
+        else:
+            info["error"] = "No image found on filesystem"
+    return info
 
 
 @app.delete("/api/brands/{brand_slug}/products/{product_idx}/image")
