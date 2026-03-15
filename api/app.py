@@ -1075,6 +1075,64 @@ async def publish_post_now(brand_slug: str, post_id: str, request: Request):
         return {"post_id": post_id, "brand_slug": brand_slug,
                 "result": {"status": "error", "detail": "No Instagram credentials."}}
 
+    # ── PRE-CHECK: Verify our image is valid before sending to Meta ───────
+    # Meta returned 400 even though it fetched our image (200 OK).
+    # This means the image data or headers are wrong.  Let's check.
+    if selected_idx is not None and os.getenv("DATABASE_URL"):
+        from storage.database import get_product_image
+        db_result = get_product_image(brand_slug, int(selected_idx))
+        if db_result:
+            img_data = bytes(db_result[0])
+            img_ct = db_result[1] if len(db_result) > 1 else "unknown"
+            is_jpeg = img_data[:2] == b'\xff\xd8'
+            is_png = img_data[:4] == b'\x89PNG'
+            is_webp = img_data[:4] == b'RIFF' and img_data[8:12] == b'WEBP'
+            print(f"[publish-now] IMAGE CHECK: size={len(img_data)} db_content_type='{img_ct}' "
+                  f"is_jpeg={is_jpeg} is_png={is_png} is_webp={is_webp} "
+                  f"first_16_hex={img_data[:16].hex()}")
+
+            # If the image is WebP or has wrong content-type, convert/fix it
+            # Instagram only accepts JPEG and PNG
+            if is_webp or (not is_jpeg and not is_png):
+                print(f"[publish-now] IMAGE IS NOT JPEG/PNG! Attempting conversion via PIL...")
+                try:
+                    from PIL import Image
+                    import io
+                    pil_img = Image.open(io.BytesIO(img_data))
+                    buf = io.BytesIO()
+                    pil_img.convert("RGB").save(buf, format="JPEG", quality=95)
+                    img_data = buf.getvalue()
+                    print(f"[publish-now] Converted to JPEG: {len(img_data)} bytes")
+                except Exception as conv_err:
+                    print(f"[publish-now] PIL conversion failed: {conv_err}")
+
+            # Upload to telegra.ph as a guaranteed-good JPEG URL
+            try:
+                tg_resp = requests.post(
+                    "https://telegra.ph/upload",
+                    files={"file": ("image.jpg", img_data, "image/jpeg")},
+                    timeout=30,
+                )
+                print(f"[publish-now] telegra.ph status={tg_resp.status_code} body={tg_resp.text[:300]}")
+                if tg_resp.status_code == 200:
+                    tg_data = tg_resp.json()
+                    if isinstance(tg_data, list) and tg_data and "src" in tg_data[0]:
+                        image_url = "https://telegra.ph" + tg_data[0]["src"]
+                        print(f"[publish-now] USING TELEGRAPH URL: {image_url}")
+            except Exception as tg_err:
+                print(f"[publish-now] telegra.ph upload failed: {tg_err}")
+        else:
+            print(f"[publish-now] WARNING: no image found in DB for product {selected_idx}")
+
+    # Also self-fetch the URL to see what Meta would see
+    try:
+        head_resp = requests.head(image_url, timeout=10, allow_redirects=True)
+        print(f"[publish-now] SELF-CHECK HEAD {image_url} → {head_resp.status_code} "
+              f"content-type={head_resp.headers.get('content-type')} "
+              f"content-length={head_resp.headers.get('content-length')}")
+    except Exception as head_err:
+        print(f"[publish-now] SELF-CHECK failed: {head_err}")
+
     # ── STEP 1: Create media container (EXACTLY like the working script) ──
     payload = {
         'image_url': image_url,
