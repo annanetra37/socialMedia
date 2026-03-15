@@ -1133,7 +1133,9 @@ async def publish_post_now(brand_slug: str, post_id: str, request: Request):
             err = result1.get("error", {})
             detail = err.get("error_user_msg") or err.get("message") or json.dumps(result1)
             return {"post_id": post_id, "brand_slug": brand_slug,
-                    "result": {"status": "error", "detail": detail}}
+                    "result": {"status": "error", "detail": detail,
+                               "attempted_url": media_url,
+                               "strategy_used": "telegra.ph" if "telegra.ph" in media_url else "railway" if "railway" in media_url.lower() else "other"}}
 
         # STEP 2: Wait for Meta to process the media
         _glog(f"[publish] STEP 2 → sleeping 5s for Meta to process container {container_id}")
@@ -1166,6 +1168,65 @@ async def publish_post_now(brand_slug: str, post_id: str, request: Request):
         _glog(f"[publish] exception: {e}")
         return {"post_id": post_id, "brand_slug": brand_slug,
                 "result": {"status": "error", "detail": str(e)}}
+
+
+@app.get("/api/brands/{brand_slug}/posts/{post_id}/publish-debug")
+async def publish_debug(brand_slug: str, post_id: str, request: Request):
+    """Debug endpoint: shows exactly what publish-now would send to Meta, without sending it."""
+    import os
+    store = DataStore.from_slug(brand_slug)
+    content = store.load("content", f"{post_id}.json")
+    if not content:
+        return {"error": f"No content for {post_id}"}
+
+    selected_idx = content.get("selected_product_idx")
+    visual = store.load("visuals", f"{post_id}.json") or {}
+    info = {
+        "post_id": post_id,
+        "selected_product_idx": selected_idx,
+        "selected_product_idx_type": type(selected_idx).__name__,
+        "has_database_url": bool(os.getenv("DATABASE_URL")),
+        "visual_keys": list(visual.keys()) if visual else [],
+        "visual_media_url": visual.get("media_url"),
+        "dalle_url": visual.get("primary_image", {}).get("generated_url", ""),
+        "db_image_found": False,
+        "db_image_size": 0,
+        "telegra_ph_url": None,
+        "railway_url": f"{_public_base_url(request)}/api/brands/{brand_slug}/products/{selected_idx}/image" if selected_idx is not None else None,
+    }
+
+    # Test DB image fetch
+    if selected_idx is not None and os.getenv("DATABASE_URL"):
+        try:
+            from storage.database import get_product_image
+            db_result = get_product_image(brand_slug, int(selected_idx))
+            if db_result:
+                img_bytes = bytes(db_result[0])
+                info["db_image_found"] = True
+                info["db_image_size"] = len(img_bytes)
+                info["db_content_type"] = db_result[1] if len(db_result) > 1 else "unknown"
+
+                # Test telegra.ph upload
+                try:
+                    tg_resp = requests.post(
+                        "https://telegra.ph/upload",
+                        files={"file": ("image.jpg", img_bytes, "image/jpeg")},
+                        timeout=30,
+                    )
+                    info["telegra_ph_status"] = tg_resp.status_code
+                    info["telegra_ph_response"] = tg_resp.json()
+                    if tg_resp.status_code == 200:
+                        tg_data = tg_resp.json()
+                        if isinstance(tg_data, list) and tg_data and "src" in tg_data[0]:
+                            info["telegra_ph_url"] = "https://telegra.ph" + tg_data[0]["src"]
+                except Exception as e:
+                    info["telegra_ph_error"] = str(e)
+            else:
+                info["db_error"] = "get_product_image returned None"
+        except Exception as e:
+            info["db_error"] = str(e)
+
+    return info
 
 
 @app.get("/api/schedule")
