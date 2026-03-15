@@ -1039,24 +1039,15 @@ async def publish_post_now(brand_slug: str, post_id: str, request: Request):
         caption = caption.strip() + "\n\n" + ht
 
     # ── Image URL ─────────────────────────────────────────────────────────
-    # Meta Graph API requires a publicly reachable URL with an image extension.
-    # Use _public_base_url() for correct proxy-aware URL and .jpg extension.
+    # Always use _public_base_url() + .jpg extension for Meta compatibility.
     selected_idx = content.get("selected_product_idx")
     print(f"[publish-now] selected_product_idx={selected_idx} type={type(selected_idx).__name__}")
 
     image_url = ""
     if selected_idx is not None:
-        # First, try the stored public_url from the database (set at upload time)
-        if os.getenv("DATABASE_URL"):
-            from storage.database import get_product_image_public_url
-            image_url = get_product_image_public_url(brand_slug, int(selected_idx)) or ""
-            if image_url:
-                print(f"[publish-now] image_url (from db public_url)={image_url}")
-        # Fallback: build URL using _public_base_url helper + .jpg extension
-        if not image_url:
-            base = _public_base_url(request)
-            image_url = f"{base}/api/brands/{brand_slug}/products/{int(selected_idx)}/image.jpg"
-            print(f"[publish-now] image_url (constructed)={image_url}")
+        base = _public_base_url(request)
+        image_url = f"{base}/api/brands/{brand_slug}/products/{int(selected_idx)}/image.jpg"
+        print(f"[publish-now] image_url={image_url}")
     else:
         # Try visuals media_url
         visual = store.load("visuals", f"{post_id}.json") or {}
@@ -1064,11 +1055,39 @@ async def publish_post_now(brand_slug: str, post_id: str, request: Request):
         if image_url and not image_url.startswith("http"):
             base = _public_base_url(request)
             image_url = f"{base}{image_url}"
+        # Ensure .jpg extension for Meta
+        if image_url and not image_url.endswith((".jpg", ".jpeg", ".png")):
+            image_url = image_url + ".jpg"
         print(f"[publish-now] fallback image_url from visuals={image_url}")
 
     if not image_url:
         return {"post_id": post_id, "brand_slug": brand_slug,
                 "result": {"status": "error", "detail": "No image URL. selected_product_idx is missing from content."}}
+
+    # ── Pre-flight: verify the image is valid before sending to Meta ──
+    try:
+        preflight = requests.get(image_url, timeout=10)
+        preflight_ct = preflight.headers.get("content-type", "")
+        preflight_len = len(preflight.content)
+        print(f"[publish-now] PREFLIGHT status={preflight.status_code} content-type={preflight_ct} size={preflight_len}")
+
+        if preflight.status_code != 200:
+            return {"post_id": post_id, "brand_slug": brand_slug,
+                    "result": {"status": "error",
+                               "detail": f"Image URL returned HTTP {preflight.status_code}. The image may not exist."}}
+
+        # Check if content looks like a real image
+        img_bytes = preflight.content
+        is_jpeg = img_bytes[:2] == b'\xff\xd8'
+        is_png = img_bytes[:4] == b'\x89PNG'
+        print(f"[publish-now] PREFLIGHT is_jpeg={is_jpeg} is_png={is_png} first_bytes={img_bytes[:8].hex()}")
+
+        if not is_jpeg and not is_png:
+            return {"post_id": post_id, "brand_slug": brand_slug,
+                    "result": {"status": "error",
+                               "detail": f"Image data is not valid JPEG/PNG. Content-type: {preflight_ct}, size: {preflight_len} bytes, header: {img_bytes[:8].hex()}"}}
+    except Exception as e:
+        print(f"[publish-now] PREFLIGHT error: {e}")
 
     # ── Meta credentials ──────────────────────────────────────────────────
     creds = brand.get("meta_credentials") or {}
