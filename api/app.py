@@ -1011,8 +1011,15 @@ async def update_campaign_post(brand_slug: str, post_id: str, request: Request):
 
 @app.post("/api/brands/{brand_slug}/posts/{post_id}/publish-now")
 async def publish_post_now(brand_slug: str, post_id: str, request: Request):
-    """Immediately publish a saved content package to Instagram."""
-    from tools.instagram_api import InstagramAPI
+    """
+    Immediately publish a saved content package to Instagram.
+
+    Mirrors the proven two-step flow that works locally:
+      1. POST /{ig_user_id}/media  with image_url + caption  → container id
+      2. sleep(5)
+      3. POST /{ig_user_id}/media_publish  with creation_id  → published
+    """
+    import json, os, time
 
     brand = _load_brand(brand_slug)
     store = DataStore.from_slug(brand_slug)
@@ -1021,7 +1028,7 @@ async def publish_post_now(brand_slug: str, post_id: str, request: Request):
     if not content:
         raise HTTPException(status_code=404, detail=f"No content package for '{post_id}'. Run a content cycle first.")
 
-    # Build caption
+    # ── Build caption ─────────────────────────────────────────────────────
     caption_data = content.get("caption", {})
     if isinstance(caption_data, dict):
         caption = caption_data.get("full_caption") or "\n\n".join(
@@ -1035,83 +1042,130 @@ async def publish_post_now(brand_slug: str, post_id: str, request: Request):
     if ht:
         caption = caption.strip() + "\n\n" + ht
 
-    # ── Resolve image bytes for publishing ───────────────────────────────
-    # Meta's Graph API requires a *publicly reachable* image URL.  PaaS
-    # hosts like Railway are often unreachable from Meta's crawlers (bot-
-    # blocking, cold-start timeouts, etc.).  So instead of giving Meta our
-    # own Railway URL, we upload the raw image bytes to telegra.ph (free,
-    # no API key, CDN-backed) and hand Meta that URL.  This mirrors what
-    # the user's local script did — give Meta a URL it can always reach.
-    import os
-    media_url = ""
-    img_bytes: bytes | None = None
-
-    # 1) Try to get raw image bytes from the DB (most reliable source)
+    # ── Resolve image URL ─────────────────────────────────────────────────
+    # Strategy (in order):
+    #   A) Upload DB image bytes to telegra.ph → guaranteed reachable CDN URL
+    #   B) Use our Railway /image endpoint (exact format proven to work:
+    #      /api/brands/{slug}/products/{idx}/image  — NO .jpg suffix)
+    #   C) DALL-E generated URL from visuals
     selected_idx = content.get("selected_product_idx")
-    if selected_idx is not None and os.getenv("DATABASE_URL"):
-        from storage.database import get_product_image
-        db_result = get_product_image(brand_slug, int(selected_idx))
-        if db_result:
-            img_bytes = bytes(db_result[0])
-            _glog(f"[publish] got {len(img_bytes)} bytes from DB for product {selected_idx}")
-
-    # 2) Fallback: try DALL-E URL from visuals
     visual = store.load("visuals", f"{post_id}.json") or {}
-    if not img_bytes:
+    media_url = ""
+
+    # --- Strategy A: telegra.ph upload (most reliable) ---
+    if selected_idx is not None and os.getenv("DATABASE_URL"):
+        try:
+            from storage.database import get_product_image
+            db_result = get_product_image(brand_slug, int(selected_idx))
+            if db_result:
+                img_bytes = bytes(db_result[0])
+                _glog(f"[publish] got {len(img_bytes)} bytes from DB for product {selected_idx}")
+                tg_resp = requests.post(
+                    "https://telegra.ph/upload",
+                    files={"file": ("image.jpg", img_bytes, "image/jpeg")},
+                    timeout=30,
+                )
+                if tg_resp.status_code == 200:
+                    tg_data = tg_resp.json()
+                    if isinstance(tg_data, list) and tg_data and "src" in tg_data[0]:
+                        media_url = "https://telegra.ph" + tg_data[0]["src"]
+                        _glog(f"[publish] telegra.ph upload OK → {media_url}")
+                    else:
+                        _glog(f"[publish] telegra.ph unexpected response: {tg_data}")
+                else:
+                    _glog(f"[publish] telegra.ph failed ({tg_resp.status_code}): {tg_resp.text[:200]}")
+        except Exception as e:
+            _glog(f"[publish] telegra.ph error: {e}")
+
+    # --- Strategy B: Railway public URL (proven format, no .jpg suffix) ---
+    if not media_url and selected_idx is not None:
+        base = _public_base_url(request)
+        media_url = f"{base}/api/brands/{brand_slug}/products/{int(selected_idx)}/image"
+        if media_url.startswith("http://"):
+            media_url = "https://" + media_url[7:]
+        _glog(f"[publish] using Railway URL: {media_url}")
+
+    # --- Strategy C: DALL-E URL ---
+    if not media_url:
         dalle_url = visual.get("primary_image", {}).get("generated_url", "")
         if dalle_url and dalle_url.startswith("https://"):
             media_url = dalle_url
-            _glog(f"[publish] using DALL-E URL directly: {media_url}")
+            _glog(f"[publish] using DALL-E URL: {media_url}")
 
-    # 3) Upload raw bytes to telegra.ph so Meta gets a reachable URL
-    if img_bytes:
-        try:
-            telegraph_resp = requests.post(
-                "https://telegra.ph/upload",
-                files={"file": ("image.jpg", img_bytes, "image/jpeg")},
-                timeout=30,
-            )
-            if telegraph_resp.status_code == 200:
-                tg_data = telegraph_resp.json()
-                if isinstance(tg_data, list) and tg_data and "src" in tg_data[0]:
-                    media_url = "https://telegra.ph" + tg_data[0]["src"]
-                    _glog(f"[publish] telegra.ph upload OK → {media_url}")
-                else:
-                    _glog(f"[publish] telegra.ph unexpected response: {tg_data}")
-            else:
-                _glog(f"[publish] telegra.ph upload failed: {telegraph_resp.status_code} {telegraph_resp.text[:200]}")
-        except Exception as e:
-            _glog(f"[publish] telegra.ph upload error: {e}")
-
-    # 4) Last-resort fallback: our own Railway URL (may not work with Meta)
     if not media_url:
-        media_url = visual.get("media_url") or ""
-        if not media_url and selected_idx is not None:
-            media_url = f"/api/brands/{brand_slug}/products/{int(selected_idx)}/image.jpg"
-        import re
-        if media_url:
-            m = re.search(r"(/api/brands/.+)$", media_url)
-            if m:
-                media_url = m.group(1)
-        if media_url and not media_url.startswith(("http://", "https://")):
-            media_url = _public_base_url(request) + media_url
-        if media_url and media_url.startswith("http://"):
-            media_url = "https://" + media_url[7:]
-        if media_url:
-            _glog(f"[publish] WARNING: falling back to Railway URL (Meta may not reach it): {media_url}")
+        return {"post_id": post_id, "brand_slug": brand_slug,
+                "result": {"status": "error", "detail": "No media URL available. Re-generate the post first."}}
 
+    # ── Read Meta credentials ─────────────────────────────────────────────
+    from tools.instagram_api import InstagramAPI
     api = InstagramAPI(brand)
-    _glog(f"Publish: brand='{brand_slug}' account_id='{api.account_id}' has_creds={api._has_credentials} media_url='{media_url}'")
-    if not media_url:
-        return {"post_id": post_id, "brand_slug": brand_slug, "result": {"status": "error", "detail": "No media URL available. Re-generate the post first."}}
-    result = api.schedule_post({
-        "post_id": post_id,
-        "caption": caption.strip(),
-        "media_url": media_url,
-        "post_type": content.get("post_type", "image"),
-    })
-    _glog(f"Manual publish: brand='{brand_slug}' post='{post_id}' → {result.get('status')}")
-    return {"post_id": post_id, "brand_slug": brand_slug, "result": result}
+    _glog(f"[publish] brand='{brand_slug}' account='{api.account_id}' has_creds={api._has_credentials} url='{media_url}'")
+
+    if not api._has_credentials:
+        return {"post_id": post_id, "brand_slug": brand_slug,
+                "result": {"status": "error", "detail": "No Instagram credentials configured for this brand."}}
+
+    # ── Two-step publish (matches the proven local script exactly) ─────────
+    try:
+        # STEP 1: Create media container
+        post_type = (content.get("post_type") or "image").lower()
+        container_payload = {
+            "caption": caption.strip(),
+            "access_token": api.access_token,
+        }
+        if post_type in ("video", "reel", "reels"):
+            container_payload["video_url"] = media_url
+            container_payload["media_type"] = "REELS"
+        else:
+            container_payload["image_url"] = media_url
+
+        create_url = f"https://graph.facebook.com/v19.0/{api.account_id}/media"
+        _debug = {k: v for k, v in container_payload.items() if k != "access_token"}
+        _glog(f"[publish] STEP 1 → POST {create_url}")
+        _glog(f"[publish] payload (sans token): {_debug}")
+
+        resp1 = requests.post(create_url, data=container_payload, timeout=60)
+        result1 = resp1.json()
+        _glog(f"[publish] STEP 1 response ({resp1.status_code}): {json.dumps(result1)}")
+
+        container_id = result1.get("id")
+        if not container_id:
+            err = result1.get("error", {})
+            detail = err.get("error_user_msg") or err.get("message") or json.dumps(result1)
+            return {"post_id": post_id, "brand_slug": brand_slug,
+                    "result": {"status": "error", "detail": detail}}
+
+        # STEP 2: Wait for Meta to process the media
+        _glog(f"[publish] STEP 2 → sleeping 5s for Meta to process container {container_id}")
+        time.sleep(5)
+
+        # STEP 3: Publish the container
+        publish_url = f"https://graph.facebook.com/v19.0/{api.account_id}/media_publish"
+        publish_payload = {
+            "creation_id": container_id,
+            "access_token": api.access_token,
+        }
+        _glog(f"[publish] STEP 3 → POST {publish_url}")
+
+        resp2 = requests.post(publish_url, data=publish_payload, timeout=60)
+        result2 = resp2.json()
+        _glog(f"[publish] STEP 3 response ({resp2.status_code}): {json.dumps(result2)}")
+
+        if result2.get("id"):
+            result2["status"] = "published"
+            _glog(f"[publish] SUCCESS! Post published: {result2['id']}")
+        else:
+            err = result2.get("error", {})
+            detail = err.get("message") or json.dumps(result2)
+            result2 = {"status": "error", "detail": detail}
+            _glog(f"[publish] FAILED at publish step: {detail}")
+
+        return {"post_id": post_id, "brand_slug": brand_slug, "result": result2}
+
+    except Exception as e:
+        _glog(f"[publish] exception: {e}")
+        return {"post_id": post_id, "brand_slug": brand_slug,
+                "result": {"status": "error", "detail": str(e)}}
 
 
 @app.get("/api/schedule")
