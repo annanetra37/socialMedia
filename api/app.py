@@ -17,6 +17,7 @@ Endpoints:
 """
 
 import json
+import requests
 import sys
 import threading
 import time
@@ -628,10 +629,14 @@ async def upload_product_image(brand_slug: str, product_idx: int, request: Reque
 
 @app.get("/api/brands/{brand_slug}/products/{product_idx}/image")
 @app.get("/api/brands/{brand_slug}/products/{product_idx}/image.jpg")
-async def serve_product_image(brand_slug: str, product_idx: int):
+@app.head("/api/brands/{brand_slug}/products/{product_idx}/image")
+@app.head("/api/brands/{brand_slug}/products/{product_idx}/image.jpg")
+async def serve_product_image(brand_slug: str, product_idx: int, request: Request):
     """Serve a product photo. The .jpg alias exists so Meta Graph API accepts the URL."""
     import os
     from fastapi.responses import Response
+    ua = request.headers.get("user-agent", "unknown")
+    _glog(f"[image-serve] {request.method} {request.url.path} from {request.client.host} UA={ua[:120]}")
     if os.getenv("DATABASE_URL"):
         from storage.database import get_product_image
         result = get_product_image(brand_slug, product_idx)
@@ -1070,6 +1075,24 @@ async def publish_post_now(brand_slug: str, post_id: str, request: Request):
     if media_url and media_url.startswith("http://"):
         media_url = "https://" + media_url[7:]
     _glog(f"[publish-debug] FINAL media_url = '{media_url}'")
+
+    # Pre-warm: fetch the image URL ourselves so Railway instance is hot when
+    # Meta's crawler arrives (cold-start timeout is the #1 cause of "media
+    # could not be fetched" errors on PaaS platforms).
+    if media_url:
+        try:
+            _warm = requests.head(media_url, timeout=15, allow_redirects=True)
+            _glog(f"[publish-debug] pre-warm HEAD {media_url} → {_warm.status_code} "
+                   f"content-type={_warm.headers.get('content-type')} "
+                   f"content-length={_warm.headers.get('content-length')}")
+            if _warm.status_code != 200:
+                # Retry with GET in case HEAD is not supported
+                _warm = requests.get(media_url, timeout=15, allow_redirects=True)
+                _glog(f"[publish-debug] pre-warm GET fallback → {_warm.status_code} "
+                       f"content-type={_warm.headers.get('content-type')} "
+                       f"len={len(_warm.content)}")
+        except Exception as e:
+            _glog(f"[publish-debug] pre-warm FAILED: {e}")
 
     api = InstagramAPI(brand)
     _glog(f"Publish: brand='{brand_slug}' account_id='{api.account_id}' has_creds={api._has_credentials} media_url='{media_url}'")
