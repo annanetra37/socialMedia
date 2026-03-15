@@ -1010,8 +1010,9 @@ async def update_campaign_post(brand_slug: str, post_id: str, request: Request):
 
 
 @app.post("/api/brands/{brand_slug}/posts/{post_id}/publish-now")
-async def publish_post_now(brand_slug: str, post_id: str, request: Request):
-    """Publish to Instagram — exact same logic as the working local script."""
+def publish_post_now(brand_slug: str, post_id: str, request: Request):
+    """Publish to Instagram.  Uses sync def so blocking requests.post / time.sleep
+    run in a threadpool and the event loop stays free to serve Meta's image fetch."""
     import json, os, time
 
     print(f"[publish-now] >>>>>> CALLED brand={brand_slug} post={post_id}")
@@ -1064,30 +1065,23 @@ async def publish_post_now(brand_slug: str, post_id: str, request: Request):
         return {"post_id": post_id, "brand_slug": brand_slug,
                 "result": {"status": "error", "detail": "No image URL. selected_product_idx is missing from content."}}
 
-    # ── Pre-flight: verify the image is valid before sending to Meta ──
-    try:
-        preflight = requests.get(image_url, timeout=10)
-        preflight_ct = preflight.headers.get("content-type", "")
-        preflight_len = len(preflight.content)
-        print(f"[publish-now] PREFLIGHT status={preflight.status_code} content-type={preflight_ct} size={preflight_len}")
-
-        if preflight.status_code != 200:
+    # ── Pre-flight: verify image exists in DB before sending to Meta ─────
+    if selected_idx is not None and os.getenv("DATABASE_URL"):
+        from storage.database import get_product_image
+        img_result = get_product_image(brand_slug, int(selected_idx))
+        if not img_result:
             return {"post_id": post_id, "brand_slug": brand_slug,
                     "result": {"status": "error",
-                               "detail": f"Image URL returned HTTP {preflight.status_code}. The image may not exist."}}
-
-        # Check if content looks like a real image
-        img_bytes = preflight.content
-        is_jpeg = img_bytes[:2] == b'\xff\xd8'
-        is_png = img_bytes[:4] == b'\x89PNG'
-        print(f"[publish-now] PREFLIGHT is_jpeg={is_jpeg} is_png={is_png} first_bytes={img_bytes[:8].hex()}")
-
+                               "detail": f"No image found in database for product index {selected_idx}."}}
+        img_data, img_ct = img_result
+        img_data = bytes(img_data)
+        is_jpeg = img_data[:2] == b'\xff\xd8'
+        is_png = img_data[:4] == b'\x89PNG'
+        print(f"[publish-now] PREFLIGHT size={len(img_data)} ct={img_ct} jpeg={is_jpeg} png={is_png}")
         if not is_jpeg and not is_png:
             return {"post_id": post_id, "brand_slug": brand_slug,
                     "result": {"status": "error",
-                               "detail": f"Image data is not valid JPEG/PNG. Content-type: {preflight_ct}, size: {preflight_len} bytes, header: {img_bytes[:8].hex()}"}}
-    except Exception as e:
-        print(f"[publish-now] PREFLIGHT error: {e}")
+                               "detail": f"Image data is not valid JPEG/PNG. Content-type: {img_ct}, size: {len(img_data)}, header: {img_data[:8].hex()}"}}
 
     # ── Meta credentials ──────────────────────────────────────────────────
     creds = brand.get("meta_credentials") or {}
