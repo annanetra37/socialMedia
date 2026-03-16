@@ -335,10 +335,10 @@ IMPORTANT: Output ONLY the JSON object. No markdown summary, no tables, no expla
         themes = strategy.get("campaign_themes", [])
         theme = themes[week - 1] if week <= len(themes) else {"theme": "Brand Showcase"}
         theme_name = theme.get("theme", "Brand Showcase")
+        brand_name = brand.get("name", "Brand")
 
         # Build dates for current week
         today = datetime.now()
-        # Align to Monday
         monday = today - timedelta(days=today.weekday())
         if week > 1:
             monday += timedelta(weeks=week - 1)
@@ -346,129 +346,102 @@ IMPORTANT: Output ONLY the JSON object. No markdown summary, no tables, no expla
         def day_date(offset: int) -> str:
             return (monday + timedelta(days=offset)).strftime("%Y-%m-%d")
 
-        posts = [
-            {
-                "id": f"post_w{week}_1",
-                "day": "Monday",
-                "date": day_date(0),
-                "time": "12:00",
-                "type": "carousel",
-                "priority": "high — boost candidate",
-                "trend_format": "Historical symbol reveal",
-                "theme": theme_name,
-                "content_brief": "Educational carousel: 7 meanings behind Norse rune symbols",
-                "hook": "\"These symbols were carved by Vikings 1200 years ago…\"",
-                "caption_brief": "Educational tone, awe-inspiring, ends with save prompt",
-                "cta": "Save this to share with someone who loves Norse culture →",
-                "hashtag_cluster": ["#nordicjewellery", "#norsemythology", "#vikingstyle",
-                                    "#scandinaviandesign", "#silversmith"],
-                "visual_notes": "Flat lay of rune necklace + illustrated rune meanings. Clean white bg.",
-                "status": "planned",
-            },
-            {
-                "id": f"post_w{week}_2",
-                "day": "Wednesday",
-                "date": day_date(2),
-                "time": "18:00",
-                "type": "reel",
-                "priority": "high — organic only",
-                "trend_format": "Before → After transformation",
-                "theme": theme_name,
-                "content_brief": "Process reel: raw silver → finished Norse necklace (ASMR style)",
-                "hook": "\"Raw silver to finished necklace in 60 seconds…\"",
-                "caption_brief": "Wonder + craftsmanship pride. Short caption, let the video speak.",
-                "cta": "Comment MADE if you'd love to own a handmade piece →",
-                "hashtag_cluster": ["#handmadejewellery", "#silversmith", "#artisanjewellery",
-                                    "#slowcraft", "#nordiccraft"],
-                "visual_notes": "Close-up hammer + anvil. Use Wardruna audio. Macro lens on silver.",
-                "status": "planned",
-            },
-            {
-                "id": f"post_w{week}_3",
-                "day": "Friday",
-                "date": day_date(4),
-                "time": "13:00",
-                "type": "reel",
-                "priority": "high — boost candidate",
-                "trend_format": "POV storytelling",
-                "theme": theme_name,
-                "content_brief": "Product showcase reel: Norse Rune Necklace worn in natural setting",
-                "hook": "\"POV: You just found the perfect gift for someone who loves Norse culture\"",
-                "caption_brief": "Aspirational, desire-building. Feature the bestseller.",
-                "cta": "DM us RUNE for price and personalisation options →",
-                "hashtag_cluster": ["#nordicjewellery", "#giftsforher", "#vikingfashion",
-                                    "#handmadegifts", "#ethicaljewellery"],
-                "visual_notes": "Model wearing necklace outdoors — forest or stone setting. Golden hour.",
-                "status": "planned",
-            },
-            {
-                "id": f"post_w{week}_4",
-                "day": "Sunday",
-                "date": day_date(6),
-                "time": "17:00",
-                "type": "image",
-                "priority": "medium — evergreen",
-                "trend_format": "Historical symbol reveal",
-                "theme": theme_name,
-                "content_brief": "Community/lifestyle image: flat lay of full collection on marble",
-                "hook": "\"Which piece speaks to you? 👇\"",
-                "caption_brief": "Community engagement. Ask a question. Warm, inviting tone.",
-                "cta": "Comment your favourite below! We read every reply →",
-                "hashtag_cluster": ["#nordicjewellery", "#scandinaviandesign", "#jewellerylover",
-                                    "#silverjewellery", "#handcrafted"],
-                "visual_notes": "Full collection flat lay. White marble. Natural light. Minimal props.",
-                "status": "planned",
-            },
-        ]
+        # ── Respect brand content_mix and posting_frequency ──────────────
+        posting_freq = brand.get("posting_frequency") or strategy.get("posting_frequency", {})
+        content_mix = brand.get("content_mix") or strategy.get("content_mix", {})
 
-        # Add 2 story posts
-        posts.extend([
-            {
-                "id": f"post_w{week}_5",
-                "day": "Tuesday",
-                "date": day_date(1),
-                "time": "09:00",
-                "type": "story",
-                "priority": "medium — engagement play",
-                "trend_format": "Historical symbol reveal",
+        reels_pw = posting_freq.get("reels_per_week", 3)
+        carousels_pw = posting_freq.get("carousels_per_week", 2)
+        images_pw = posting_freq.get("images_per_week", 1)
+        stories_pd = posting_freq.get("stories_per_day", 2)
+
+        # If content_mix is set and posting_frequency is not, derive counts
+        # from mix percentages applied to a reasonable total (e.g. 7 feed posts/week)
+        if content_mix and not posting_freq:
+            total_feed = 7
+            reels_pw = max(0, round(content_mix.get("reels", 0.4) * total_feed))
+            carousels_pw = max(0, round(content_mix.get("carousels", 0.3) * total_feed))
+            images_pw = max(0, round(content_mix.get("images", 0.2) * total_feed))
+            stories_pd = max(0, round(content_mix.get("stories", 0.1) * 3))  # ~3 stories/day at 100%
+
+        # Zero out types that are explicitly 0 in content_mix
+        if content_mix.get("reels") == 0: reels_pw = 0
+        if content_mix.get("carousels") == 0: carousels_pw = 0
+        if content_mix.get("images") == 0: images_pw = 0
+        if content_mix.get("stories") == 0: stories_pd = 0
+
+        # Build post slots from counts (stories_per_day → 1 story slot per day capped at stories_pd per week)
+        stories_pw = min(stories_pd * 7, 7)  # cap at 7 story posts in the weekly plan
+        type_slots = (
+            ["reel"] * reels_pw +
+            ["carousel"] * carousels_pw +
+            ["image"] * images_pw +
+            ["story"] * stories_pw
+        )
+
+        if not type_slots:
+            type_slots = ["image"]  # fallback: at least one post
+
+        days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        times = ["09:00", "12:00", "13:00", "15:00", "17:00", "18:00", "19:00"]
+        priorities = [
+            "high — boost candidate", "high — organic only",
+            "medium — evergreen", "medium — engagement play",
+            "low — filler", "low — test concept",
+        ]
+        trend_by_type = {
+            "reel": "Before → After transformation",
+            "carousel": "Educational carousel",
+            "image": "Product showcase",
+            "story": "Behind the scenes",
+        }
+        brief_by_type = {
+            "reel": (f"Process reel: showcasing {brand_name} in action",
+                     f"\"Watch how {brand_name} creates something special…\"",
+                     "Wonder + craftsmanship. Short caption, let the video speak.",
+                     f"Comment MADE if you love what {brand_name} does →"),
+            "carousel": (f"Educational carousel: key insights about {brand_name}",
+                         f"\"Did you know? Swipe to discover…\"",
+                         "Educational tone, awe-inspiring, ends with save prompt",
+                         "Save this and share with a friend →"),
+            "image": (f"Lifestyle image: {brand_name} product in context",
+                      "\"Which one speaks to you? 👇\"",
+                      "Community engagement. Ask a question. Warm tone.",
+                      "Comment your favourite below →"),
+            "story": (f"Interactive story: quick poll or behind-the-scenes peek",
+                      "Quick question for you 👇",
+                      "Interactive, light-hearted",
+                      "Vote in our poll →"),
+        }
+
+        posts = []
+        for i, ptype in enumerate(type_slots):
+            day_idx = i % 7
+            brief, hook, caption, cta = brief_by_type.get(ptype, brief_by_type["image"])
+            posts.append({
+                "id": f"post_w{week}_{i+1}",
+                "day": days[day_idx],
+                "date": day_date(day_idx),
+                "time": times[i % len(times)],
+                "type": ptype,
+                "priority": priorities[i % len(priorities)],
+                "trend_format": trend_by_type.get(ptype, "Product showcase"),
                 "theme": theme_name,
-                "content_brief": "Poll story: 'Which Norse symbol resonates with you?'",
-                "hook": "Quick question for you 👇",
-                "caption_brief": "Interactive, light-hearted",
-                "cta": "Vote in our poll →",
-                "hashtag_cluster": [],
-                "visual_notes": "Branded story template. Two rune options as poll buttons.",
+                "content_brief": brief,
+                "hook": hook,
+                "caption_brief": caption,
+                "cta": cta,
+                "hashtag_cluster": [f"#{brand_name.lower().replace(' ', '')}"],
+                "visual_notes": f"High-quality visual for {ptype} post.",
                 "status": "planned",
-            },
-            {
-                "id": f"post_w{week}_6",
-                "day": "Thursday",
-                "date": day_date(3),
-                "time": "19:00",
-                "type": "story",
-                "priority": "low — filler",
-                "trend_format": "Behind the scenes",
-                "theme": theme_name,
-                "content_brief": "Behind-the-scenes story: workshop peek, tools on bench",
-                "hook": "Thursday in the workshop ✨",
-                "caption_brief": "Raw and authentic, swipe up to see process reel",
-                "cta": "See the full process reel on our feed →",
-                "hashtag_cluster": [],
-                "visual_notes": "Candid workshop shot. Tools, silver scraps, workbench.",
-                "status": "planned",
-            },
-        ])
+            })
+
+        summary = CampaignPlannerAgent._build_summary(posts)
 
         return {
             "week_number": week,
             "theme": theme_name,
-            "brand": brand.get("name", "Brand"),
+            "brand": brand_name,
             "posts": posts,
-            "weekly_summary": {
-                "total_posts": len(posts),
-                "reels": 2,
-                "carousels": 1,
-                "images": 1,
-                "stories": 2,
-            },
+            "weekly_summary": summary,
         }
