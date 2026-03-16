@@ -126,6 +126,24 @@ tr:hover td { background: rgba(108,99,255,.04); }
 .form-input:focus, .form-select:focus { outline: none; border-color: var(--primary); }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
+/* Language multi-select dropdown */
+.lang-dropdown { position: relative; }
+.lang-dropdown-trigger { display: flex; align-items: center; justify-content: space-between; min-height: 38px; background: var(--bg); border: 1px solid var(--border); border-radius: 7px; padding: 4px 10px; cursor: pointer; transition: border-color .15s; flex-wrap: wrap; gap: 4px; }
+.lang-dropdown-trigger:hover { border-color: var(--primary); }
+.lang-dropdown-arrow { color: var(--muted); font-size: 10px; flex-shrink: 0; margin-left: 4px; }
+.lang-selected-tags { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; min-height: 24px; align-items: center; }
+.lang-selected-tags:empty::after { content: 'Select languages...'; color: var(--muted); font-size: 12px; }
+.lang-tag { display: inline-flex; align-items: center; gap: 3px; background: var(--primary); color: #fff; font-size: 11px; font-weight: 500; padding: 2px 6px 2px 8px; border-radius: 12px; white-space: nowrap; }
+.lang-tag button { background: none; border: none; color: rgba(255,255,255,.8); cursor: pointer; font-size: 13px; line-height: 1; padding: 0 1px; font-weight: 700; }
+.lang-tag button:hover { color: #fff; }
+.lang-dropdown-panel { position: absolute; top: 100%; left: 0; right: 0; z-index: 100; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; margin-top: 4px; padding: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.25); max-height: 240px; overflow: hidden; display: flex; flex-direction: column; }
+.lang-options { overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.lang-option { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 5px; font-size: 12px; cursor: pointer; color: var(--text); transition: background .1s; }
+.lang-option:hover { background: rgba(99,102,241,.1); }
+.lang-option.selected { background: rgba(99,102,241,.12); font-weight: 600; }
+.lang-option .lang-check { width: 16px; height: 16px; border: 1.5px solid var(--border); border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 10px; flex-shrink: 0; transition: all .15s; }
+.lang-option.selected .lang-check { background: var(--primary); border-color: var(--primary); color: #fff; }
+
 /* Empty state */
 .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 20px; color: var(--muted); text-align: center; gap: 10px; }
 .empty-icon { font-size: 40px; opacity: .4; }
@@ -1123,23 +1141,17 @@ tr:hover td { background: rgba(108,99,255,.04); }
         <div class="form-group">
           <label class="form-label">Content Languages</label>
           <p style="font-size:11px;color:var(--muted);margin:0 0 6px;">Select languages the brand's content should be generated in.</p>
-          <div id="bf-languages" style="display:flex;flex-wrap:wrap;gap:6px;">
-            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" value="English" checked> English</label>
-            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" value="Spanish"> Spanish</label>
-            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" value="French"> French</label>
-            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" value="German"> German</label>
-            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" value="Italian"> Italian</label>
-            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" value="Portuguese"> Portuguese</label>
-            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" value="Arabic"> Arabic</label>
-            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" value="Turkish"> Turkish</label>
-            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" value="Hindi"> Hindi</label>
-            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" value="Chinese"> Chinese</label>
-            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" value="Japanese"> Japanese</label>
-            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" value="Korean"> Korean</label>
-            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" value="Dutch"> Dutch</label>
-            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" value="Russian"> Russian</label>
+          <div id="bf-lang-dropdown" class="lang-dropdown">
+            <div class="lang-dropdown-trigger" onclick="toggleLangPanel()">
+              <div class="lang-selected-tags" id="bf-lang-tags"><span class="lang-tag">English <button onclick="event.stopPropagation();removeLang('English')">&times;</button></span></div>
+              <span class="lang-dropdown-arrow">&#9662;</span>
+            </div>
+            <div class="lang-dropdown-panel" id="bf-lang-panel" style="display:none;">
+              <input type="text" class="form-input" id="bf-lang-search" placeholder="Search or type a custom language..." oninput="filterLangs()" onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomLang()}" style="font-size:12px;margin-bottom:6px;border-radius:6px;">
+              <div class="lang-options" id="bf-lang-options"></div>
+            </div>
           </div>
-          <input type="text" class="form-input" id="bf-lang-custom" placeholder="Other languages (comma-separated)" style="margin-top:6px;font-size:12px;">
+          <input type="hidden" id="bf-languages-data">
         </div>
       </div>
 
@@ -3313,6 +3325,9 @@ async function editBrand(slug) {
   if (cm.stories != null) document.getElementById('bf-story').value = Math.round(cm.stories*100);
   ['reel','carousel','image','story'].forEach(t => updatePillarVal(t, document.getElementById(`bf-${t}`).value));
 
+  // Languages
+  setSelectedLanguages(profile.languages || ['English']);
+
   renderBfSteps();
   showBfStep(1);
   const overlay = document.getElementById('brand-form-overlay');
@@ -3362,6 +3377,7 @@ function openBrandForm() {
   document.getElementById('bf-freq-images').value = 1;
   document.getElementById('bf-freq-stories').value = 2;
   document.getElementById('bf-timezone').value = 'UTC';
+  setSelectedLanguages(['English']);
   document.getElementById('bf-products-list').innerHTML = '';
   Object.keys(_productImages).forEach(k => delete _productImages[k]);
   _productCount = 0;
@@ -3575,6 +3591,88 @@ function updatePillarVal(type, value) {
   }
 }
 
+// ── Language multi-select dropdown ─────────────────────────────────────────
+const _ALL_LANGUAGES = [
+  'English','Spanish','French','German','Italian','Portuguese',
+  'Arabic','Turkish','Hindi','Chinese','Japanese','Korean',
+  'Dutch','Russian','Polish','Swedish','Thai','Vietnamese',
+  'Indonesian','Malay','Filipino','Swahili','Greek','Hebrew',
+  'Czech','Romanian','Hungarian','Finnish','Norwegian','Danish'
+];
+let _selectedLangs = ['English'];
+
+function renderLangTags() {
+  const container = document.getElementById('bf-lang-tags');
+  if (!container) return;
+  container.innerHTML = _selectedLangs.map(l =>
+    `<span class="lang-tag">${l} <button onclick="event.stopPropagation();removeLang('${l.replace(/'/g,"\\'")}')">&times;</button></span>`
+  ).join('');
+}
+
+function renderLangOptions() {
+  const container = document.getElementById('bf-lang-options');
+  const search = (document.getElementById('bf-lang-search')?.value || '').toLowerCase();
+  const filtered = _ALL_LANGUAGES.filter(l => l.toLowerCase().includes(search));
+  container.innerHTML = filtered.map(l => {
+    const sel = _selectedLangs.includes(l) ? 'selected' : '';
+    return `<div class="lang-option ${sel}" onclick="toggleLangOption('${l.replace(/'/g,"\\'")}')"><span class="lang-check">${sel ? '✓' : ''}</span>${l}</div>`;
+  }).join('');
+  if (search && !filtered.length) {
+    container.innerHTML = `<div class="lang-option" onclick="addCustomLang()" style="color:var(--primary);font-weight:500;">+ Add "${document.getElementById('bf-lang-search').value.trim()}"</div>`;
+  }
+}
+
+function toggleLangPanel() {
+  const panel = document.getElementById('bf-lang-panel');
+  const isOpen = panel.style.display !== 'none';
+  panel.style.display = isOpen ? 'none' : 'flex';
+  if (!isOpen) {
+    document.getElementById('bf-lang-search').value = '';
+    renderLangOptions();
+    document.getElementById('bf-lang-search').focus();
+  }
+}
+
+function toggleLangOption(lang) {
+  const idx = _selectedLangs.indexOf(lang);
+  if (idx >= 0) _selectedLangs.splice(idx, 1);
+  else _selectedLangs.push(lang);
+  renderLangTags();
+  renderLangOptions();
+}
+
+function removeLang(lang) {
+  _selectedLangs = _selectedLangs.filter(l => l !== lang);
+  renderLangTags();
+  renderLangOptions();
+}
+
+function filterLangs() { renderLangOptions(); }
+
+function addCustomLang() {
+  const input = document.getElementById('bf-lang-search');
+  const val = (input?.value || '').trim();
+  if (val && !_selectedLangs.includes(val)) {
+    _selectedLangs.push(val);
+    renderLangTags();
+  }
+  if (input) input.value = '';
+  renderLangOptions();
+}
+
+function getSelectedLanguages() { return [..._selectedLangs]; }
+function setSelectedLanguages(langs) {
+  _selectedLangs = Array.isArray(langs) && langs.length ? [...langs] : ['English'];
+  renderLangTags();
+}
+
+// Close dropdown when clicking outside
+document.addEventListener('click', e => {
+  const dd = document.getElementById('bf-lang-dropdown');
+  const panel = document.getElementById('bf-lang-panel');
+  if (dd && panel && !dd.contains(e.target)) panel.style.display = 'none';
+});
+
 async function submitBrandForm() {
   const name = document.getElementById('bf-name').value.trim();
   if (!name) { toast('Brand name is required','error'); return; }
@@ -3632,11 +3730,7 @@ async function submitBrandForm() {
       stories_per_day:    parseInt(document.getElementById('bf-freq-stories').value  || 2),
     },
     timezone: document.getElementById('bf-timezone').value || 'UTC',
-    languages: (() => {
-      const checked = [...document.querySelectorAll('#bf-languages input[type=checkbox]:checked')].map(c => c.value);
-      const custom = (document.getElementById('bf-lang-custom').value || '').split(',').map(s => s.trim()).filter(Boolean);
-      return [...new Set([...checked, ...custom])];
-    })(),
+    languages: getSelectedLanguages(),
   };
 
   // Attach credentials if provided
